@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bolsápolis</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #0b1020; font-family: system-ui, sans-serif; }
+      #app { display: flex; height: 100%; }
+      #game { flex: 1; min-width: 0; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
