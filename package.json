@@ -1,0 +1,20 @@
+{
+  "name": "bolsapolis",
+  "version": "0.1.0",
+  "description": "RTS de finanzas: tu portafolio es tu imperio.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1"
+  }
+}
