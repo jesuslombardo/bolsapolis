@@ -29,11 +29,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Requiere que Pages este activado una vez a mano:
+      # Settings -> Pages -> Source: "GitHub Actions". Despues, cada push
+      # despliega automaticamente.
       - uses: actions/configure-pages@v5
-        # Habilita GitHub Pages automaticamente la primera vez (fuente = Actions),
-        # asi no hace falta activarlo a mano en los ajustes del repo.
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
