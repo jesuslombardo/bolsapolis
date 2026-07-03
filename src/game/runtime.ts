@@ -20,7 +20,14 @@ export interface LocalRuntimeOpts {
   playerId?: string;
 }
 
-export function createLocalRuntime(opts: LocalRuntimeOpts): Runtime {
+// El runtime local anyade un gancho de depuracion que no forma parte de la
+// interfaz de red (Runtime), por eso se tipa aparte.
+export interface LocalRuntime extends Runtime {
+  /** Solo desarrollo: inyecta efectivo para probar los niveles de ciudad. */
+  __debugGrantCash(cents: number): void;
+}
+
+export function createLocalRuntime(opts: LocalRuntimeOpts): LocalRuntime {
   const playerId = opts.playerId ?? "p1";
   const tickMs = opts.tickMs ?? 1000;
   let state = createInitialState(opts.seed, playerId);
