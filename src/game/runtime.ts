@@ -18,6 +18,8 @@ export interface LocalRuntimeOpts {
   /** Milisegundos entre ticks de mercado. */
   tickMs?: number;
   playerId?: string;
+  /** Estado inicial (p.ej. una partida guardada). Si falta, se crea uno nuevo. */
+  initialState?: GameState;
 }
 
 // El runtime local anyade un gancho de depuracion que no forma parte de la
@@ -30,7 +32,7 @@ export interface LocalRuntime extends Runtime {
 export function createLocalRuntime(opts: LocalRuntimeOpts): LocalRuntime {
   const playerId = opts.playerId ?? "p1";
   const tickMs = opts.tickMs ?? 1000;
-  let state = createInitialState(opts.seed, playerId);
+  let state = opts.initialState ?? createInitialState(opts.seed, playerId);
   const listeners = new Set<(s: GameState) => void>();
   let timer: ReturnType<typeof setInterval> | null = null;
 

@@ -108,13 +108,70 @@ export const BOND_DEFS: StockDef[] = [
   },
 ];
 
-// Todos los activos negociables.
-export const ASSET_DEFS: StockDef[] = [...STOCK_DEFS, ...BOND_DEFS];
+// Materias primas: se compran en el Almacen de Ramos Generales.
+export const COMMODITY_DEFS: StockDef[] = [
+  {
+    id: "DOLAR",
+    name: "Dolar",
+    kind: "commodity",
+    sector: "Dolar",
+    emoji: "💵",
+    blurb:
+      "La divisa. Refugio clasico del argentino: cuando el peso se devalua, el dolar sube. Sirve para no perder valor.",
+    startPriceCents: 100000,
+    drift: 0.0007,
+    volatility: 0.01,
+  },
+  {
+    id: "SOJA",
+    name: "Soja",
+    kind: "commodity",
+    sector: "Agro",
+    emoji: "🌱",
+    blurb:
+      "El yuyito que mueve al pais. Su precio depende del clima y de la demanda mundial. Le pega el mismo clima que al agro.",
+    startPriceCents: 42000,
+    drift: 0.0004,
+    volatility: 0.02,
+  },
+  {
+    id: "ORO",
+    name: "Oro",
+    kind: "commodity",
+    sector: "Metales",
+    emoji: "🥇",
+    blurb:
+      "Refugio universal. Cuando hay incertidumbre, todos corren al oro y sube. Estable y brillante.",
+    startPriceCents: 250000,
+    drift: 0.0005,
+    volatility: 0.012,
+  },
+];
 
-export function defsForKind(kind: "stock" | "bond"): StockDef[] {
+// Todos los activos negociables.
+export const ASSET_DEFS: StockDef[] = [...STOCK_DEFS, ...BOND_DEFS, ...COMMODITY_DEFS];
+
+export function defsForKind(kind: "stock" | "bond" | "commodity"): StockDef[] {
   return ASSET_DEFS.filter((d) => d.kind === kind);
 }
 
 export function defById(id: string): StockDef | undefined {
   return ASSET_DEFS.find((d) => d.id === id);
 }
+
+// Pool de noticias de mercado. Cada una sacude un sector (positivo o negativo)
+// durante un rato. Los tickers y sectores coinciden con los de arriba.
+export const MARKET_EVENTS: Array<{ headline: string; sector: string; drift: number }> = [
+  { sector: "Agro", drift: 0.006, headline: "🌾 Gran cosecha: vuela el agro" },
+  { sector: "Agro", drift: -0.006, headline: "☀️ Sequia: cae el agro" },
+  { sector: "Energia", drift: 0.007, headline: "🛢️ Sube el petroleo: energia en alza" },
+  { sector: "Energia", drift: -0.006, headline: "🔌 Menos demanda: energia floja" },
+  { sector: "Tecnologia", drift: 0.008, headline: "💻 Boom tecnologico" },
+  { sector: "Tecnologia", drift: -0.006, headline: "📉 Se pincha la tecno" },
+  { sector: "Construccion", drift: 0.006, headline: "🏗️ Obra publica: repunta la construccion" },
+  { sector: "Construccion", drift: -0.006, headline: "🧱 Freno a la obra: cae construccion" },
+  { sector: "Industria", drift: 0.006, headline: "🏭 Repunta la industria" },
+  { sector: "Dolar", drift: 0.01, headline: "💵 Salta el dolar" },
+  { sector: "Dolar", drift: -0.006, headline: "💵 Se calma el dolar" },
+  { sector: "Metales", drift: 0.007, headline: "🥇 Vuelo del oro" },
+];

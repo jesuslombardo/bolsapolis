@@ -2,8 +2,9 @@
 // Mantener este archivo libre de dependencias de Phaser: es codigo puro que
 // tambien correra en el servidor (Cloudflare Durable Object).
 
-// Tipo de activo: accion (volatil) o bono (estable, tipo renta fija).
-export type AssetKind = "stock" | "bond";
+// Tipo de activo: accion (volatil), bono (renta fija) o materia prima
+// (dolar, soja, oro; se compran en el Almacen).
+export type AssetKind = "stock" | "bond" | "commodity";
 
 export interface StockDef {
   id: string;
@@ -47,11 +48,23 @@ export interface PlayerState {
   holdings: Record<string, Holding>;
 }
 
+// Noticia de mercado activa: sacude un sector durante un rato.
+export interface MarketEvent {
+  headline: string;
+  sector: string;
+  /** Sesgo de deriva aplicado a los activos del sector mientras dura. */
+  drift: number;
+  /** Tick hasta el cual sigue vigente. */
+  untilTick: number;
+}
+
 export interface GameState {
   tick: number;
   seed: number;
   stocks: Record<string, Stock>;
   players: Record<string, PlayerState>;
+  /** Noticia de mercado vigente (o null). */
+  event: MarketEvent | null;
 }
 
 export type Command =
@@ -64,3 +77,7 @@ export const HISTORY_LEN = 60;
 
 // Interes de la caja de ahorro por tick (compuesto). Pequenyo pero visible.
 export const SAVINGS_RATE = 0.0006;
+
+// Noticias de mercado: cada cuanto puede aparecer una, y cuanto dura.
+export const EVENT_PERIOD = 40;
+export const EVENT_DURATION = 20;

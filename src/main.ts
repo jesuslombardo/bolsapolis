@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { createLocalRuntime } from "./game/runtime.ts";
 import { WorldScene } from "./game/WorldScene.ts";
 import { mountHud } from "./ui/hud.ts";
+import { loadSave, writeSave } from "./game/save.ts";
 
 // Garantiza el escalado correcto en movil (por si el host no inyecta viewport).
 if (!document.querySelector("meta[name=viewport]")) {
@@ -15,7 +16,9 @@ if (!document.querySelector("meta[name=viewport]")) {
 // En multiplayer la asignara el servidor al crear la sala.
 const SEED = 20260703;
 
-const runtime = createLocalRuntime({ seed: SEED, tickMs: 700 });
+// Carga la partida guardada, si existe.
+const saved = loadSave();
+const runtime = createLocalRuntime({ seed: SEED, tickMs: 700, initialState: saved?.state });
 
 const gameEl = document.getElementById("game")!;
 const appEl = document.getElementById("app")!;
@@ -30,15 +33,30 @@ const game = new Phaser.Game({
     width: "100%",
     height: "100%",
   },
-  scene: [WorldScene],
 });
 
 const hud = mountHud(appEl, runtime, "p1");
-game.scene.start("world", { runtime, hud, playerId: "p1" });
+const worldScene = new WorldScene();
+game.scene.add("world", worldScene, true, {
+  runtime,
+  hud,
+  playerId: "p1",
+  heroStart: saved?.hero ?? null,
+});
 runtime.start();
+
+// Autoguardado: cada 4 s y al cerrar/ocultar la pestanya.
+function save() {
+  writeSave(runtime.getState(), worldScene.getHeroPos());
+}
+setInterval(save, 4000);
+window.addEventListener("beforeunload", save);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") save();
+});
 
 // Gancho de depuracion solo en desarrollo (util para probar niveles de ciudad
 // sin tener que operar durante minutos). No se incluye en el build de produccion.
 if (import.meta.env.DEV) {
-  (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game, hud };
+  (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game, hud, worldScene };
 }

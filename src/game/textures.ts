@@ -236,6 +236,49 @@ export function buildTextures(scene: Phaser.Scene) {
     "ssssssssssssss",
   ], banco);
 
+  // Almacen de Ramos Generales: casa con toldo verde y cartel.
+  const almacen: Palette = {
+    a: 0x2f8f4e, // toldo verde
+    A: 0xe8f0e0, // franja clara
+    w: 0x8a6a3a, // madera clara
+    W: 0x6a4a2a,
+    s: 0xd8c8a8, // pared clara
+    g: 0xe8c34a, // cartel
+    k: 0x2a1a0e,
+    ".": null,
+  };
+  makePixel(scene, "b_almacen", [
+    "...gggggggg...",
+    "..gkgkgkgkgg..",
+    ".aAaAaAaAaAaA.",
+    "aAaAaAaAaAaAaA",
+    "wWwwwwwwwwwwWw",
+    "wssssssssssssw",
+    "wsswwssswwsssw",
+    "wssww sswwsssw",
+    "wsswwssswwsssw",
+    "wsssssssssss w",
+    "wsssskksssss w",
+    "wsssskkssssssw",
+    "wwwwwwwwwwwwww",
+  ], almacen);
+
+  // Rancho (casa rural de adobe): mas variedad en el pueblo.
+  const rancho: Palette = { t: 0xb98a4a, T: 0x9c7238, s: 0xc7a878, S: 0xa98a5c, k: 0x2a1a0e, ".": null };
+  makePixel(scene, "b_rancho", [
+    "..TTTTTTTT..",
+    ".TttttttttT.",
+    "TttttttttttT",
+    "TTTTTTTTTTTT",
+    ".ssssssssss.",
+    ".sSssssssSs.",
+    ".ssssssssss.",
+    ".sssskkssss.",
+    ".sSsskkssSs.",
+    ".sssskkssss.",
+    ".ssssssssss.",
+  ], rancho);
+
   // Cartel indicador.
   const sign: Palette = { w: 0x6a4a2a, W: 0x4e3620, g: 0xe8c34a, ".": null };
   makePixel(scene, "sign", [
@@ -367,4 +410,29 @@ export function buildTextures(scene: Phaser.Scene) {
     ".pp..pp.",
     ".pp..pp.",
   ], NPC2);
+
+  // Almacenero (Almacen): boina y delantal marron.
+  const NPC3: Palette = {
+    e: 0xf0c39b,
+    h: 0x3a2a18, // boina
+    u: 0x8a5a2a, // delantal marron
+    U: 0x6a4420,
+    p: 0x2a2018,
+    k: 0x1a1206,
+    ".": null,
+  };
+  makePixel(scene, "npc_grocer", [
+    ".hhhhhh.",
+    "hhhhhhhh",
+    ".heeeeh.",
+    ".eeeeee.",
+    ".ekeeke.",
+    "..eeee..",
+    ".uUuuUu.",
+    "uUuuuuUu",
+    "uUuuuuUu",
+    ".uuuuuu.",
+    ".pp..pp.",
+    ".pp..pp.",
+  ], NPC3);
 }

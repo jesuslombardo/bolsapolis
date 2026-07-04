@@ -1,6 +1,6 @@
-import type { Command, GameState, Holding, PlayerState, Stock } from "./types.ts";
-import { HISTORY_LEN, SAVINGS_RATE } from "./types.ts";
-import { ASSET_DEFS } from "./market.ts";
+import type { Command, GameState, Holding, MarketEvent, PlayerState, Stock } from "./types.ts";
+import { HISTORY_LEN, SAVINGS_RATE, EVENT_PERIOD, EVENT_DURATION } from "./types.ts";
+import { ASSET_DEFS, MARKET_EVENTS } from "./market.ts";
 import { makeRng, gaussian } from "./rng.ts";
 
 // Motor de simulacion PURO y determinista.
@@ -46,7 +46,14 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
     savingsCents: 0,
     holdings,
   };
-  return { tick: 0, seed, stocks, players: { [playerId]: player } };
+  return { tick: 0, seed, stocks, players: { [playerId]: player }, event: null };
+}
+
+// Genera (de forma determinista) una noticia de mercado para este tick.
+function rollEvent(seed: number, tick: number): MarketEvent {
+  const rng = makeRng((seed ^ (tick * 0x27d4eb2f)) >>> 0);
+  const e = MARKET_EVENTS[Math.floor(rng() * MARKET_EVENTS.length)];
+  return { headline: e.headline, sector: e.sector, drift: e.drift, untilTick: tick + EVENT_DURATION };
 }
 
 // RNG derivado de (seed, tick, indice-del-valor). Al mezclar el tick, cada paso
@@ -62,10 +69,19 @@ function priceFor(seed: number, tick: number, stockIndex: number, prevCents: num
 
 export function tick(state: GameState): GameState {
   const nextTick = state.tick + 1;
+
+  // Noticia de mercado: mantiene la vigente o dispara una nueva cada tanto.
+  let event = state.event && nextTick <= state.event.untilTick ? state.event : null;
+  if (!event && nextTick % EVENT_PERIOD === 0) event = rollEvent(state.seed, nextTick);
+
   const stocks: Record<string, Stock> = {};
   ASSET_DEFS.forEach((def, i) => {
     const prev = state.stocks[def.id];
-    const priceCents = priceFor(state.seed, nextTick, i, prev.priceCents, def.drift, def.volatility);
+    // La noticia sesga la deriva (y sube un poco la volatilidad) del sector.
+    const affected = event && event.sector === def.sector;
+    const drift = def.drift + (affected ? event!.drift : 0);
+    const vol = def.volatility * (affected ? 1.5 : 1);
+    const priceCents = priceFor(state.seed, nextTick, i, prev.priceCents, drift, vol);
     const history = [...prev.history, priceCents];
     if (history.length > HISTORY_LEN) history.shift();
     stocks[def.id] = { ...prev, priceCents, history };
@@ -78,7 +94,7 @@ export function tick(state: GameState): GameState {
     players[id] = interest > 0 ? { ...p, savingsCents: p.savingsCents + interest } : p;
   }
 
-  return { ...state, tick: nextTick, stocks, players };
+  return { ...state, tick: nextTick, stocks, players, event };
 }
 
 export function applyCommand(state: GameState, cmd: Command): GameState {

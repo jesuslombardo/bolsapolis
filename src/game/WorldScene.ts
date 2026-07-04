@@ -51,15 +51,24 @@ export class WorldScene extends Phaser.Scene {
   private solids: Array<{ x: number; y: number; r: number }> = [];
   private lastTier = "";
   private stepTimer = 0;
+  private heroStart: { x: number; y: number } | null = null;
+  private night!: Phaser.GameObjects.Rectangle;
+  private townSignText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("world");
   }
 
-  init(data: { runtime: Runtime; hud: HudApi; playerId?: string }) {
+  init(data: { runtime: Runtime; hud: HudApi; playerId?: string; heroStart?: { x: number; y: number } | null }) {
     this.runtime = data.runtime;
     this.hud = data.hud;
     if (data.playerId) this.playerId = data.playerId;
+    this.heroStart = data.heroStart ?? null;
+  }
+
+  /** Posicion actual del heroe (para guardar la partida). */
+  getHeroPos() {
+    return this.hero ? { x: Math.round(this.hero.x), y: Math.round(this.hero.y) } : null;
   }
 
   create() {
@@ -68,30 +77,48 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setZoom(2.6);
     this.cameras.main.roundPixels = true;
 
+    const cx = (COLS / 2) * TILE;
+    const cy = (ROWS / 2) * TILE;
+
     this.paintGround();
+    this.paintRoads(cx, cy);
     this.scatterNature();
 
     this.buildings = this.add.container(0, 0);
 
-    const cx = (COLS / 2) * TILE;
-    const cy = (ROWS / 2) * TILE;
-
-    // Comercios: la Bolsa (acciones) y el Banco (bonos), flanqueando la plaza.
+    // Comercios: Bolsa (acciones), Banco (bonos) y Almacen (materias primas).
     this.shops = [
-      { kind: "stock", name: "Bolsa", tex: "b_bolsa", x: cx - 3 * TILE, y: cy - TILE },
-      { kind: "bond", name: "Banco", tex: "b_banco", x: cx + 3 * TILE, y: cy - TILE },
+      { kind: "stock", name: "Bolsa", tex: "b_bolsa", x: cx - 4 * TILE, y: cy - TILE },
+      { kind: "bond", name: "Banco", tex: "b_banco", x: cx + 4 * TILE, y: cy - TILE },
+      { kind: "commodity", name: "Almacen", tex: "b_almacen", x: cx, y: cy - 4 * TILE },
     ];
 
     // Fuente central del pueblo.
     this.add.image(cx, cy, "well").setDepth(cy);
 
+    // Cartel del pueblo (con su nombre segun el nivel), a la entrada sur.
+    this.add.image(cx - 8, cy + 5 * TILE, "sign").setOrigin(0.5, 1).setDepth(cy + 5 * TILE);
+    this.townSignText = this.add
+      .text(cx, cy + 5 * TILE - 22, "Paraje", {
+        fontFamily: "system-ui",
+        fontSize: "16px",
+        fontStyle: "bold",
+        color: "#ffe9a6",
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(9999)
+      .setResolution(3);
+    this.townSignText.setScale(1 / this.cameras.main.zoom);
+
     this.computePlots(cx, cy);
 
     // Dibuja los comercios con su cartel flotante y su vendedor (NPC).
+    const shopIcon: Record<string, string> = { stock: "📈", bond: "🏦", commodity: "🏬" };
+    const shopNpc: Record<string, string> = { stock: "npc_merchant", bond: "npc_banker", commodity: "npc_grocer" };
     for (const shop of this.shops) {
       this.add.image(shop.x, shop.y, shop.tex).setOrigin(0.5, 1).setDepth(shop.y);
       const label = this.add
-        .text(shop.x, shop.y - 30, `${shop.kind === "stock" ? "📈" : "🏦"} ${shop.name}`, {
+        .text(shop.x, shop.y - 30, `${shopIcon[shop.kind]} ${shop.name}`, {
           fontFamily: "system-ui",
           fontSize: "20px",
           fontStyle: "bold",
@@ -102,8 +129,7 @@ export class WorldScene extends Phaser.Scene {
         .setResolution(3);
       label.setScale(1 / this.cameras.main.zoom);
       // Vendedor parado frente al comercio.
-      const npcTex = shop.kind === "stock" ? "npc_merchant" : "npc_banker";
-      const npc = this.add.image(shop.x, shop.y + 8, npcTex).setOrigin(0.5, 1).setDepth(shop.y + 8);
+      const npc = this.add.image(shop.x, shop.y + 8, shopNpc[shop.kind]).setOrigin(0.5, 1).setDepth(shop.y + 8);
       this.tweens.add({ targets: npc, y: npc.y - 1.5, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     }
 
@@ -114,9 +140,20 @@ export class WorldScene extends Phaser.Scene {
       ...this.treeSolids,
     ];
 
-    // Heroe.
-    this.hero = this.add.image(cx, cy + 44, "hero_down").setDepth(cy + 44);
+    // Heroe (en la posicion guardada, o en la plaza).
+    const hx = this.heroStart?.x ?? cx;
+    const hy = this.heroStart?.y ?? cy + 44;
+    this.hero = this.add.image(hx, hy, "hero_down").setDepth(hy);
     this.cameras.main.startFollow(this.hero, true, 0.15, 0.15);
+
+    // Capa de dia/noche: rectangulo azul que se aclara/oscurece con el tiempo.
+    this.night = this.add
+      .rectangle(0, 0, this.scale.width, this.scale.height, 0x0a1230)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(50000)
+      .setAlpha(0);
+    this.scale.on("resize", () => this.night.setSize(this.scale.width, this.scale.height));
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
@@ -153,6 +190,22 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  // Caminos de tierra: una cruz que atraviesa el pueblo y sale al campo.
+  private paintRoads(cx: number, cy: number) {
+    const midC = Math.round(cx / TILE);
+    const midR = Math.round(cy / TILE);
+    for (let c = 2; c < COLS - 2; c++) {
+      for (let d = -1; d <= 1; d++) {
+        this.add.image(c * TILE, (midR + d) * TILE, "path").setOrigin(0, 0).setDepth(-997);
+      }
+    }
+    for (let r = 2; r < ROWS - 2; r++) {
+      for (let d = -1; d <= 1; d++) {
+        this.add.image((midC + d) * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-997);
+      }
+    }
+  }
+
   // Arboles decorativos por los bordes y claros del mapa (patron determinista).
   // Cada arbol es un solido: su tronco bloquea el paso.
   private scatterNature() {
@@ -166,6 +219,7 @@ export class WorldScene extends Phaser.Scene {
       const r = Math.floor(rnd() * ROWS);
       if (Math.hypot(c - midC, r - midR) < 12) continue; // deja libre el pueblo
       if (c > 5 && c < 15 && r > 4 && r < 13) continue; // deja libre el estanque
+      if (Math.abs(c - midC) <= 1 || Math.abs(r - midR) <= 1) continue; // deja libres los caminos
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE;
       this.add.image(x, y, "tree").setOrigin(0.5, 1).setDepth(y);
@@ -225,6 +279,7 @@ export class WorldScene extends Phaser.Scene {
     // Subida de nivel de la ciudad: destello de camara (el aviso + sonido los
     // maneja el HUD, que ve cada cambio de estado).
     const tier = tierName(p);
+    if (this.townSignText) this.townSignText.setText(tier);
     if (this.lastTier && tier !== this.lastTier) {
       this.cameras.main.flash(350, 120, 170, 255);
     }
@@ -321,17 +376,23 @@ export class WorldScene extends Phaser.Scene {
     if (this.nearShop && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
       this.hud.openShop(this.nearShop.kind);
     }
+
+    // Ciclo dia/noche: la capa azul se oscurece de noche (ciclo ~100 s).
+    const CYCLE = 100000;
+    const nightness = (1 - Math.cos((( _t % CYCLE) / CYCLE) * Math.PI * 2)) / 2;
+    this.night.setAlpha(nightness * 0.5);
   }
 }
 
 function buildingKey(prosperity: number, i: number): string {
   // Variedad determinista + mejora de tier con la prosperidad.
   const v = frac(Math.sin((i + 1) * 45.23) * 1000);
+  const v2 = frac(Math.sin((i + 1) * 91.7) * 1000);
   const level = prosperity * 3 + v; // 0..~4
   if (i === 0 && prosperity > 0.7) return "b_castle";
   if (level > 2.6) return "b_tower";
-  if (level > 1.3) return "b_house";
-  return "b_hut";
+  if (level > 1.3) return v2 < 0.4 ? "b_house" : "b_rancho";
+  return v2 < 0.5 ? "b_hut" : "b_rancho";
 }
 
 function frac(x: number): number {

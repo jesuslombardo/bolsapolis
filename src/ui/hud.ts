@@ -5,6 +5,7 @@ import { prosperityOf, tierNameForProsperity } from "../sim/city.ts";
 import { ASSET_DEFS, defsForKind } from "../sim/market.ts";
 import { touchMove, isTouchDevice } from "../game/input.ts";
 import { sfx } from "../game/audio.ts";
+import { clearSave } from "../game/save.ts";
 import { money, pct } from "./format.ts";
 
 // Interfaz RPG superpuesta sobre el mundo:
@@ -17,6 +18,10 @@ import { money, pct } from "./format.ts";
 // (openShop) desde la tecla E o el boton tactil.
 
 const TRADE_SIZE = 5;
+
+function kindLabel(kind: AssetKind): string {
+  return kind === "stock" ? "Accion" : kind === "bond" ? "Bono" : "Materia prima";
+}
 
 export interface HudApi {
   openShop(kind: AssetKind): void;
@@ -44,12 +49,36 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     zIndex: "20",
   });
 
-  // --- Boton Inventario (arriba derecha) ---
+  // --- Botones (arriba derecha): Misiones + Inventario ---
   const bagBtn = btn(root, "🎒 Inventario", {
     position: "fixed",
     top: "12px",
     right: "12px",
     zIndex: "30",
+  });
+  const missionsBtn = btn(root, "🎯 Misiones", {
+    position: "fixed",
+    top: "12px",
+    right: "160px",
+    background: "#26325c",
+    zIndex: "30",
+  });
+
+  // --- Barra de noticias de mercado (bajo la barra de estado) ---
+  const newsBar = el(root, "div", {
+    position: "fixed",
+    top: "54px",
+    left: "12px",
+    maxWidth: "70vw",
+    display: "none",
+    padding: "6px 12px",
+    background: "rgba(40,20,52,.8)",
+    border: "1px solid #6a3a63",
+    borderRadius: "8px",
+    color: "#ffd9f0",
+    font: "600 12px system-ui, sans-serif",
+    zIndex: "20",
+    pointerEvents: "none",
   });
 
   // --- Boton Entrar (aparece cerca de un comercio) ---
@@ -65,9 +94,10 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     zIndex: "35",
   });
 
-  // --- Ventanas (inventario y comercio) ---
+  // --- Ventanas (inventario, comercio, misiones) ---
   const invWin = makeWindow(root, "🎒 Inventario");
   const shopWin = makeWindow(root, "");
+  const missionsWin = makeWindow(root, "🎯 Misiones");
 
   // Contenedor de avisos (toasts).
   const toastHost = el(root, "div", {
@@ -107,51 +137,99 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
   }
 
   let invOpen = false;
+  let missionsOpen = false;
   let shopKind: AssetKind | null = null;
   let nearShop: { kind: AssetKind; name: string } | null = null;
   let qty: number | "max" = TRADE_SIZE; // cantidad por operacion en el comercio
   let detailId: string | null = null; // activo cuya ficha se esta viendo
 
-  function refreshInv(open: boolean) {
-    invOpen = open;
+  // --- Misiones ---
+  const ownsKind = (state: GameState, kind: AssetKind) => {
+    const p = state.players[playerId];
+    return Object.keys(p.holdings).some(
+      (id) => p.holdings[id].shares > 0 && ASSET_DEFS.find((d) => d.id === id)?.kind === kind,
+    );
+  };
+  const tierIndex = (state: GameState) => Math.min(5, Math.floor(prosperityOf(state, playerId) * 6));
+  const MISSIONS: Array<{ id: string; label: string; done: (s: GameState) => boolean }> = [
+    { id: "stock", label: "Compra tu primera accion (Bolsa)", done: (s) => ownsKind(s, "stock") },
+    { id: "bond", label: "Proba un bono (Banco)", done: (s) => ownsKind(s, "bond") },
+    { id: "commodity", label: "Compra dolar, soja u oro (Almacen)", done: (s) => ownsKind(s, "commodity") },
+    { id: "savings", label: "Guarda plata en la Caja de Ahorro", done: (s) => s.players[playerId].savingsCents > 0 },
+    { id: "pueblo", label: "Haces crecer tu pueblo a Pueblo", done: (s) => tierIndex(s) >= 1 },
+    { id: "w50", label: "Junta $50.000 de patrimonio", done: (s) => netWorthCents(s, playerId) >= 5_000_000 },
+    { id: "ciudad", label: "Llega a Ciudad", done: (s) => tierIndex(s) >= 3 },
+    { id: "w100", label: "Junta $100.000 de patrimonio", done: (s) => netWorthCents(s, playerId) >= 10_000_000 },
+    { id: "capital", label: "Converti tu pueblo en Capital", done: (s) => tierIndex(s) >= 5 },
+  ];
+  const missionsDone = new Set<string>();
+  let missionsSeeded = false;
+
+  // --- Noticias de mercado ---
+  let lastEventHeadline = "";
+  let eventSeeded = false;
+
+  function closeAll() {
+    invOpen = false;
+    missionsOpen = false;
+    shopKind = null;
     detailId = null;
+    invWin.root.style.transform = "translateX(110%)";
+    missionsWin.root.style.transform = "translateX(110%)";
+    shopWin.root.style.transform = "translateX(110%)";
+  }
+  function refreshInv(open: boolean) {
+    closeAll();
+    invOpen = open;
     invWin.root.style.transform = open ? "translateX(0)" : "translateX(110%)";
-    if (open) {
-      shopKind = null;
-      shopWin.root.style.transform = "translateX(110%)";
-    }
     render(runtime.getState());
   }
+  function refreshMissions(open: boolean) {
+    closeAll();
+    missionsOpen = open;
+    missionsWin.root.style.transform = open ? "translateX(0)" : "translateX(110%)";
+    render(runtime.getState());
+  }
+  const shopTitle: Record<AssetKind, string> = {
+    stock: "📈 Bolsa de Valores",
+    bond: "🏦 Banco de Bonos",
+    commodity: "🏬 Almacen de Ramos",
+  };
+  const shopGreet: Record<AssetKind, string> = {
+    stock: "Mercader: —¿Qué hacés, campeón? Pasá a invertir.",
+    bond: "Banquero: —Bienvenido. Su plata, segura acá.",
+    commodity: "Almacenero: —Pasá, pasá. Dólar, soja u oro, lo que precises.",
+  };
   function openShopWin(kind: AssetKind | null) {
     const greet = kind && kind !== shopKind;
+    closeAll();
     shopKind = kind;
-    detailId = null;
-    shopWin.title.textContent = kind === "stock" ? "📈 Bolsa de Valores" : kind === "bond" ? "🏦 Banco de Bonos" : "";
+    shopWin.title.textContent = kind ? shopTitle[kind] : "";
     shopWin.root.style.transform = kind ? "translateX(0)" : "translateX(110%)";
-    if (kind) {
-      invOpen = false;
-      invWin.root.style.transform = "translateX(110%)";
-      if (greet) {
-        sfx.talk();
-        toast(kind === "stock" ? "Mercader: —¿Qué hacés, campeón? Pasá a invertir." : "Banquero: —Bienvenido. Su plata, segura acá.", "info");
-      }
+    if (kind && greet) {
+      sfx.talk();
+      toast(shopGreet[kind], "info");
     }
     render(runtime.getState());
   }
 
   bagBtn.onclick = () => refreshInv(!invOpen);
+  missionsBtn.onclick = () => refreshMissions(!missionsOpen);
   invWin.close.onclick = () => refreshInv(false);
+  missionsWin.close.onclick = () => refreshMissions(false);
   shopWin.close.onclick = () => openShopWin(null);
   enterBtn.onclick = () => nearShop && openShopWin(nearShop.kind);
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "i" || e.key === "I") refreshInv(!invOpen);
+    if (e.key === "m" || e.key === "M") refreshMissions(!missionsOpen);
     if (e.key === "Escape") {
       if (detailId) {
         detailId = null;
         render(runtime.getState());
       } else if (shopKind) openShopWin(null);
       else if (invOpen) refreshInv(false);
+      else if (missionsOpen) refreshMissions(false);
     }
   });
 
@@ -318,7 +396,7 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
         <div style="width:52px;height:52px;flex:0 0 52px;display:grid;place-items:center;background:#1a2445;border-radius:12px;font-size:30px">${def.emoji}</div>
         <div>
           <div style="font:700 18px system-ui">${def.name}</div>
-          <div style="font-size:12px;color:#8fb2ff">${def.id} · ${def.sector} · ${def.kind === "stock" ? "Accion" : "Bono"}</div>
+          <div style="font-size:12px;color:#8fb2ff">${def.id} · ${def.sector} · ${kindLabel(def.kind)}</div>
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px">
@@ -374,6 +452,14 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
         render(runtime.getState());
       };
     });
+    container.querySelectorAll<HTMLButtonElement>("[data-reset]").forEach((b) => {
+      b.onclick = () => {
+        if (confirm("¿Reiniciar la partida? Se perdera el progreso guardado.")) {
+          clearSave();
+          location.reload();
+        }
+      };
+    });
   }
 
   let lastTier = "";
@@ -389,6 +475,50 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       toast(`¡Tu ciudad crecio a ${tier}!`, "good");
     }
     lastTier = tier;
+
+    // Noticias de mercado: barra + aviso cuando aparece una nueva.
+    const headline = state.event?.headline ?? "";
+    if (headline) {
+      newsBar.style.display = "block";
+      newsBar.textContent = "📰 " + headline;
+    } else {
+      newsBar.style.display = "none";
+    }
+    if (eventSeeded && headline && headline !== lastEventHeadline) {
+      const good = (state.event?.drift ?? 0) >= 0;
+      sfx.talk();
+      toast("📰 " + headline, good ? "good" : "bad");
+    }
+    lastEventHeadline = headline;
+    eventSeeded = true;
+
+    // Misiones: detecta las recien completadas (aviso + sonido).
+    for (const m of MISSIONS) {
+      const done = m.done(state);
+      if (done && !missionsDone.has(m.id)) {
+        missionsDone.add(m.id);
+        if (missionsSeeded) {
+          sfx.coin();
+          toast(`🎯 Mision cumplida: ${m.label}`, "good");
+        }
+      }
+    }
+    missionsSeeded = true;
+
+    if (missionsOpen) {
+      const doneN = MISSIONS.filter((m) => missionsDone.has(m.id)).length;
+      missionsWin.body.innerHTML =
+        `<div style="font-size:13px;color:#9fb0dd;margin-bottom:12px">Progreso: <b style="color:#eaf0ff">${doneN}/${MISSIONS.length}</b></div>` +
+        MISSIONS.map((m) => {
+          const done = missionsDone.has(m.id);
+          return `<div style="display:flex;gap:10px;align-items:center;border:1px solid ${done ? "#2f6b3f" : "#26325c"};border-radius:10px;padding:10px;margin-bottom:8px;background:${done ? "#0f2417" : "#101a38"}">
+            <span style="font-size:18px">${done ? "✅" : "⬜"}</span>
+            <span style="flex:1;color:${done ? "#a7e6bd" : "#dfe6ff"}">${m.label}</span>
+          </div>`;
+        }).join("") +
+        `<button data-reset="1" style="margin-top:14px;width:100%;cursor:pointer;border:1px solid #6a3140;border-radius:8px;padding:10px;background:#2a1620;color:#ffb3c0;font-weight:700">🔄 Reiniciar partida</button>`;
+      wire(missionsWin.body);
+    }
 
     statusBar.innerHTML = `
       <span style="display:flex;gap:6px;align-items:center"><span style="font-size:17px">💰</span><b style="color:#ffe08a;font-size:16px">${money(player.cashCents)}</b></span>
