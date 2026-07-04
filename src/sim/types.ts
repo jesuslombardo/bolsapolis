@@ -9,6 +9,12 @@ export interface StockDef {
   id: string;
   name: string;
   kind: AssetKind;
+  /** Rubro/sector (Agro, Energia, Tecnologia...). */
+  sector: string;
+  /** Icono del activo. */
+  emoji: string;
+  /** Como gana plata la empresa (o como paga el bono). */
+  blurb: string;
   /** Precio inicial en centimos para evitar errores de coma flotante. */
   startPriceCents: number;
   /** Deriva diaria (drift). Positiva = tiende a subir. */

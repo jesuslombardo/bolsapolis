@@ -25,7 +25,7 @@ const WORLD_W = COLS * TILE;
 const WORLD_H = ROWS * TILE;
 const SPEED = 95;
 
-const TIER_NAMES = ["Aldea", "Pueblo", "Villa", "Ciudad", "Metropoli", "Megalopolis"];
+const TIER_NAMES = ["Paraje", "Pueblo", "Villa", "Ciudad", "Metropoli", "Capital"];
 
 export class WorldScene extends Phaser.Scene {
   private runtime!: Runtime;

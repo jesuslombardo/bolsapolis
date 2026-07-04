@@ -15,12 +15,12 @@ const WEALTH_MIN = 6_000;
 const WEALTH_MAX = 90_000;
 
 const TIER_NAMES = [
-  "Aldea",
+  "Paraje",
   "Pueblo",
   "Villa",
   "Ciudad",
   "Metropoli",
-  "Megalopolis",
+  "Capital",
 ];
 
 export interface Building {

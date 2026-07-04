@@ -140,9 +140,11 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
   let shopKind: AssetKind | null = null;
   let nearShop: { kind: AssetKind; name: string } | null = null;
   let qty: number | "max" = TRADE_SIZE; // cantidad por operacion en el comercio
+  let detailId: string | null = null; // activo cuya ficha se esta viendo
 
   function refreshInv(open: boolean) {
     invOpen = open;
+    detailId = null;
     invWin.root.style.transform = open ? "translateX(0)" : "translateX(110%)";
     if (open) {
       shopKind = null;
@@ -151,12 +153,15 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     render(runtime.getState());
   }
   function openShopWin(kind: AssetKind | null) {
+    const greet = kind && kind !== shopKind;
     shopKind = kind;
+    detailId = null;
     shopWin.title.textContent = kind === "stock" ? "📈 Bolsa de Valores" : kind === "bond" ? "🏦 Banco de Bonos" : "";
     shopWin.root.style.transform = kind ? "translateX(0)" : "translateX(110%)";
     if (kind) {
       invOpen = false;
       invWin.root.style.transform = "translateX(110%)";
+      if (greet) toast(kind === "stock" ? "Mercader: —¿Qué hacés, campeón? Pasá a invertir." : "Banquero: —Bienvenido. Su plata, segura acá.", "info");
     }
     render(runtime.getState());
   }
@@ -169,7 +174,10 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
   window.addEventListener("keydown", (e) => {
     if (e.key === "i" || e.key === "I") refreshInv(!invOpen);
     if (e.key === "Escape") {
-      if (shopKind) openShopWin(null);
+      if (detailId) {
+        detailId = null;
+        render(runtime.getState());
+      } else if (shopKind) openShopWin(null);
       else if (invOpen) refreshInv(false);
     }
   });
@@ -232,8 +240,8 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     const qtyLabel = qty === "max" ? "" : ` ${qty}`;
     return `
       <div style="border:1px solid #26325c;border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#101a38">
-        <div style="display:flex;justify-content:space-between;align-items:baseline">
-          <div><b>${def.id}</b> <span style="color:#8092c0;font-size:12px">${def.name}</span></div>
+        <div data-info="${id}" style="cursor:pointer;display:flex;justify-content:space-between;align-items:baseline">
+          <div style="display:flex;gap:8px;align-items:baseline"><span style="font-size:17px">${def.emoji}</span><span><b>${def.name}</b> <span style="color:#8092c0;font-size:11px">${def.id} · ${def.sector} ℹ️</span></span></div>
           <div style="text-align:right">
             <div>${money(stock.priceCents)}</div>
             <div style="font-size:12px;color:${change >= 0 ? "#5ee08a" : "#ff6b81"}">${pct(change)}</div>
@@ -280,22 +288,84 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       </div>`;
   }
 
-  // Item del inventario (un activo que posees).
+  // Item del inventario (un activo que posees). Clic en la ficha -> detalle.
   function invItem(state: GameState, id: string): string {
     const def = ASSET_DEFS.find((d) => d.id === id)!;
     const stock = state.stocks[id];
     const h = state.players[playerId].holdings[id]!;
     const value = h.shares * stock.priceCents;
     const pl = (stock.priceCents - h.avgCostCents) * h.shares;
-    const icon = def.kind === "stock" ? "📈" : "🏦";
     return `
       <div style="display:flex;gap:10px;align-items:center;border:1px solid #26325c;border-radius:10px;padding:10px;margin-bottom:8px;background:#101a38">
-        <div style="width:38px;height:38px;flex:0 0 38px;display:grid;place-items:center;background:#1a2445;border-radius:8px;font-size:20px">${icon}</div>
-        <div style="flex:1;min-width:0">
-          <div><b>${def.id}</b> <span style="color:#8092c0;font-size:12px">${def.kind === "stock" ? "Accion" : "Bono"}</span></div>
-          <div style="font-size:12px;color:#9fb0dd">${h.shares} u · vale ${money(value)} · <span style="color:${pl >= 0 ? "#5ee08a" : "#ff6b81"}">${pl >= 0 ? "+" : ""}${money(pl)}</span></div>
+        <div data-info="${id}" style="cursor:pointer;display:flex;gap:10px;align-items:center;flex:1;min-width:0">
+          <div style="width:38px;height:38px;flex:0 0 38px;display:grid;place-items:center;background:#1a2445;border-radius:8px;font-size:20px">${def.emoji}</div>
+          <div style="flex:1;min-width:0">
+            <div><b>${def.name}</b> <span style="color:#8092c0;font-size:11px">${def.id} · ${def.sector} ℹ️</span></div>
+            <div style="font-size:12px;color:#9fb0dd">${h.shares} u · ${money(value)} · <span style="color:${pl >= 0 ? "#5ee08a" : "#ff6b81"}">${pl >= 0 ? "+" : ""}${money(pl)}</span></div>
+          </div>
         </div>
         <button data-sell="${id}" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;background:#26325c;color:#dfe6ff;font-weight:700">Vender${qty === "max" ? "" : ` ${qty}`}</button>
+      </div>`;
+  }
+
+  // Mini grafico de la evolucion reciente del precio (SVG).
+  function sparkline(history: number[]): string {
+    const h = history.slice(-40);
+    if (h.length < 2) return "";
+    const min = Math.min(...h);
+    const max = Math.max(...h);
+    const w = 300;
+    const ht = 46;
+    const span = max - min || 1;
+    const pts = h
+      .map((v, i) => `${((i / (h.length - 1)) * w).toFixed(1)},${(ht - ((v - min) / span) * (ht - 4) - 2).toFixed(1)}`)
+      .join(" ");
+    const up = h[h.length - 1] >= h[0];
+    const color = up ? "#5ee08a" : "#ff6b81";
+    return `<svg viewBox="0 0 ${w} ${ht}" preserveAspectRatio="none" style="width:100%;height:46px;display:block;margin:8px 0">
+      <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+  }
+
+  // Ficha de detalle de un activo: descripcion + como gana plata + operar.
+  function detailView(state: GameState, id: string): string {
+    const def = ASSET_DEFS.find((d) => d.id === id)!;
+    const stock = state.stocks[id];
+    const player = state.players[playerId];
+    const h = player.holdings[id];
+    const shares = h?.shares ?? 0;
+    const value = shares * stock.priceCents;
+    const pl = h ? (stock.priceCents - h.avgCostCents) * h.shares : 0;
+    const change = stock.history.length > 1 ? stock.priceCents / stock.history[stock.history.length - 2] - 1 : 0;
+    const canBuy = player.cashCents >= stock.priceCents;
+    const qtyLabel = qty === "max" ? "" : ` ${qty}`;
+    return `
+      <button data-back="1" style="cursor:pointer;border:0;background:none;color:#8fb2ff;font:700 14px system-ui;padding:0 0 10px">‹ Volver</button>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:6px">
+        <div style="width:52px;height:52px;flex:0 0 52px;display:grid;place-items:center;background:#1a2445;border-radius:12px;font-size:30px">${def.emoji}</div>
+        <div>
+          <div style="font:700 18px system-ui">${def.name}</div>
+          <div style="font-size:12px;color:#8fb2ff">${def.id} · ${def.sector} · ${def.kind === "stock" ? "Accion" : "Bono"}</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px">
+        <div style="font:700 22px system-ui">${money(stock.priceCents)}</div>
+        <div style="color:${change >= 0 ? "#5ee08a" : "#ff6b81"};font-weight:700">${pct(change)}</div>
+      </div>
+      ${sparkline(stock.history)}
+      <div style="background:#101a38;border:1px solid #26325c;border-radius:10px;padding:12px;margin:6px 0 12px">
+        <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#8fb2ff;margin-bottom:6px">Como gana plata</div>
+        <div style="font-size:13px;color:#cdd8f5;line-height:1.5">${def.blurb}</div>
+      </div>
+      <div style="font-size:13px;color:#9fb0dd;margin-bottom:10px">Tienes <b style="color:#eaf0ff">${shares}</b>${
+        shares > 0
+          ? ` · vale <b style="color:#eaf0ff">${money(value)}</b> · <span style="color:${pl >= 0 ? "#5ee08a" : "#ff6b81"}">${pl >= 0 ? "+" : ""}${money(pl)}</span>`
+          : ""
+      }</div>
+      ${qtySelector()}
+      <div style="display:flex;gap:8px">
+        <button data-buy="${id}" ${canBuy ? "" : "disabled"} style="flex:1;cursor:pointer;border:0;border-radius:8px;padding:11px;background:${canBuy ? "#2f6bff" : "#33406b"};color:#fff;font-weight:700">Comprar${qtyLabel}</button>
+        <button data-sell="${id}" ${shares > 0 ? "" : "disabled"} style="flex:1;cursor:pointer;border:0;border-radius:8px;padding:11px;background:${shares > 0 ? "#26325c" : "#1b2440"};color:#dfe6ff;font-weight:700">Vender${qtyLabel}</button>
       </div>`;
   }
 
@@ -318,6 +388,18 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     });
     container.querySelectorAll<HTMLButtonElement>("[data-wit]").forEach((b) => {
       b.onclick = () => bank("WITHDRAW", b.dataset.wit === "max" ? "max" : Number(b.dataset.wit));
+    });
+    container.querySelectorAll<HTMLElement>("[data-info]").forEach((n) => {
+      n.onclick = () => {
+        detailId = n.dataset.info!;
+        render(runtime.getState());
+      };
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-back]").forEach((b) => {
+      b.onclick = () => {
+        detailId = null;
+        render(runtime.getState());
+      };
     });
   }
 
@@ -343,24 +425,34 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       <span style="color:#8fb2ff">🏛️ ${tier}</span>`;
 
     if (invOpen) {
-      const ids = Object.keys(player.holdings).filter((id) => player.holdings[id].shares > 0);
-      const invested = holdingsValueCents(state, playerId);
-      invWin.body.innerHTML =
-        `<div style="font-size:12px;color:#9fb0dd;margin-bottom:10px">Valor invertido: <b style="color:#eaf0ff">${money(invested)}</b> · Ahorro: <b style="color:#7ee0a1">${money(player.savingsCents)}</b> · Efectivo: <b style="color:#ffe08a">${money(player.cashCents)}</b></div>` +
-        (ids.length ? qtySelector() : "") +
-        (ids.length
-          ? ids.map((id) => invItem(state, id)).join("")
-          : `<div style="color:#8092c0;padding:20px 4px">No tienes activos. Ve a la <b>Bolsa</b> o al <b>Banco</b> y compra algo.</div>`);
+      if (detailId) {
+        invWin.body.innerHTML = detailView(state, detailId);
+      } else {
+        const ids = Object.keys(player.holdings).filter((id) => player.holdings[id].shares > 0);
+        const invested = holdingsValueCents(state, playerId);
+        invWin.body.innerHTML =
+          `<div style="font-size:12px;color:#9fb0dd;margin-bottom:10px">Invertido: <b style="color:#eaf0ff">${money(invested)}</b> · Ahorro: <b style="color:#7ee0a1">${money(player.savingsCents)}</b> · Efectivo: <b style="color:#ffe08a">${money(player.cashCents)}</b></div>` +
+          `<div style="font-size:11px;color:#6b7bab;margin-bottom:10px">Toca un activo para ver su ficha ℹ️</div>` +
+          (ids.length ? qtySelector() : "") +
+          (ids.length
+            ? ids.map((id) => invItem(state, id)).join("")
+            : `<div style="color:#8092c0;padding:20px 4px">No tienes activos. Ve a la <b>Bolsa</b> o al <b>Banco</b> y compra algo.</div>`);
+      }
       wire(invWin.body);
     }
 
     if (shopKind) {
-      const ids = defsForKind(shopKind).map((d) => d.id);
-      shopWin.body.innerHTML =
-        `<div style="font-size:13px;color:#ffe08a;margin-bottom:12px">💰 Tu oro: <b>${money(player.cashCents)}</b></div>` +
-        (shopKind === "bond" ? savingsPanel(state) : "") +
-        qtySelector() +
-        ids.map((id) => shopCard(state, id)).join("");
+      if (detailId) {
+        shopWin.body.innerHTML = detailView(state, detailId);
+      } else {
+        const ids = defsForKind(shopKind).map((d) => d.id);
+        shopWin.body.innerHTML =
+          `<div style="font-size:13px;color:#ffe08a;margin-bottom:12px">💰 Tu plata: <b>${money(player.cashCents)}</b></div>` +
+          (shopKind === "bond" ? savingsPanel(state) : "") +
+          `<div style="font-size:11px;color:#6b7bab;margin-bottom:10px">Toca un activo para ver su ficha ℹ️</div>` +
+          qtySelector() +
+          ids.map((id) => shopCard(state, id)).join("");
+      }
       wire(shopWin.body);
     }
   }

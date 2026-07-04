@@ -1,8 +1,8 @@
-// Formato de moneda a partir de centimos enteros.
-const fmt = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Formato de moneda (pesos) a partir de centimos enteros.
+const fmt = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function money(cents: number): string {
-  return fmt.format(cents / 100) + " §";
+  return "$ " + fmt.format(cents / 100);
 }
 
 export function pct(x: number): string {
