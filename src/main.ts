@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { createLocalRuntime } from "./game/runtime.ts";
-import { CityScene } from "./game/CityScene.ts";
+import { WorldScene } from "./game/WorldScene.ts";
 import { mountHud } from "./ui/hud.ts";
 
 // Seed fija por ahora para partidas reproducibles durante el desarrollo.
@@ -15,16 +15,17 @@ const appEl = document.getElementById("app")!;
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: gameEl,
-  backgroundColor: "#0b1020",
+  backgroundColor: "#243b26",
+  pixelArt: true,
   scale: {
     mode: Phaser.Scale.RESIZE,
     width: "100%",
     height: "100%",
   },
-  scene: [CityScene],
+  scene: [WorldScene],
 });
 
-game.scene.start("city", { runtime, playerId: "p1" });
+game.scene.start("world", { runtime, playerId: "p1" });
 
 mountHud(appEl, runtime, "p1");
 runtime.start();

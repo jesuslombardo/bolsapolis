@@ -48,6 +48,10 @@ export function prosperityOf(state: GameState, playerId: string): number {
   return clamp01((units - WEALTH_MIN) / (WEALTH_MAX - WEALTH_MIN));
 }
 
+export function tierNameForProsperity(p: number): string {
+  return TIER_NAMES[Math.min(TIER_NAMES.length - 1, Math.floor(p * TIER_NAMES.length))];
+}
+
 export function cityView(state: GameState, playerId: string): CityView {
   const p = prosperityOf(state, playerId);
 
