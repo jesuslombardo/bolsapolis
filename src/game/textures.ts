@@ -30,6 +30,18 @@ function makePixel(scene: Phaser.Scene, key: string, grid: Grid, palette: Palett
   g.destroy();
 }
 
+// Textura de brillo radial para las lucecitas de la noche.
+function makeGlow(scene: Phaser.Scene) {
+  if (scene.textures.exists("glow")) return;
+  const g = scene.make.graphics({ x: 0, y: 0 }, false);
+  for (let r = 11; r >= 1; r--) {
+    g.fillStyle(0xffffff, 0.09);
+    g.fillCircle(11, 11, r);
+  }
+  g.generateTexture("glow", 22, 22);
+  g.destroy();
+}
+
 // Tono verde con ruido determinista para el cesped.
 function makeGrass(scene: Phaser.Scene, key: string, base: number, spec: number, seed: number) {
   if (scene.textures.exists(key)) return;
@@ -47,6 +59,7 @@ function makeGrass(scene: Phaser.Scene, key: string, base: number, spec: number,
 }
 
 export function buildTextures(scene: Phaser.Scene) {
+  makeGlow(scene);
   // --- Suelos ---
   makeGrass(scene, "grass0", 0x3f7a34, 0x4c8c3d, 11);
   makeGrass(scene, "grass1", 0x3a7130, 0x356a2b, 23);
@@ -278,6 +291,27 @@ export function buildTextures(scene: Phaser.Scene) {
     ".sssskkssss.",
     ".ssssssssss.",
   ], rancho);
+
+  // Muralla de piedra (ladrillos con mortero).
+  const wall: Palette = { s: 0x8a8f99, S: 0xa2a7b0, m: 0x4e535c, ".": null };
+  makePixel(scene, "wall", [
+    "SSSSSSSSSSSSSSSS",
+    "ssssssssssssssss",
+    "ssssssssssssssss",
+    "mmmmmmmmmmmmmmmm",
+    "sssssssmssssssss",
+    "sssssssmssssssss",
+    "sssssssmssssssss",
+    "mmmmmmmmmmmmmmmm",
+    "sssmssssssssmsss",
+    "sssmssssssssmsss",
+    "sssmssssssssmsss",
+    "mmmmmmmmmmmmmmmm",
+    "sssssssmssssssss",
+    "sssssssmssssssss",
+    "sssssssmssssssss",
+    "mmmmmmmmmmmmmmmm",
+  ], wall);
 
   // Cartel indicador.
   const sign: Palette = { w: 0x6a4a2a, W: 0x4e3620, g: 0xe8c34a, ".": null };

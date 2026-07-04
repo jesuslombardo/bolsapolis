@@ -25,6 +25,7 @@ const ROWS = 52;
 const WORLD_W = COLS * TILE;
 const WORLD_H = ROWS * TILE;
 const SPEED = 95;
+const WALL_HALF = 9; // media anchura del pueblo amurallado, en tiles
 
 const TIER_NAMES = ["Paraje", "Pueblo", "Villa", "Ciudad", "Metropoli", "Capital"];
 
@@ -48,12 +49,17 @@ export class WorldScene extends Phaser.Scene {
   private nearShop: Shop | null = null;
   private staticSolids: Array<{ x: number; y: number; r: number }> = [];
   private treeSolids: Array<{ x: number; y: number; r: number }> = [];
+  private waterSolids: Array<{ x: number; y: number; r: number }> = [];
+  private wallSolids: Array<{ x: number; y: number; r: number }> = [];
   private solids: Array<{ x: number; y: number; r: number }> = [];
   private lastTier = "";
   private stepTimer = 0;
   private heroStart: { x: number; y: number } | null = null;
   private night!: Phaser.GameObjects.Rectangle;
   private townSignText!: Phaser.GameObjects.Text;
+  private townLights!: Phaser.GameObjects.Container;
+  private buildingLights!: Phaser.GameObjects.Container;
+  private testHour: number | null = null;
 
   constructor() {
     super("world");
@@ -73,6 +79,8 @@ export class WorldScene extends Phaser.Scene {
 
   create() {
     buildTextures(this);
+    const hourParam = new URLSearchParams(location.search).get("hour");
+    if (hourParam != null && !Number.isNaN(parseFloat(hourParam))) this.testHour = parseFloat(hourParam);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.setZoom(2.6);
     this.cameras.main.roundPixels = true;
@@ -82,9 +90,12 @@ export class WorldScene extends Phaser.Scene {
 
     this.paintGround();
     this.paintRoads(cx, cy);
+    this.paintWalls(cx, cy);
     this.scatterNature();
 
     this.buildings = this.add.container(0, 0);
+    this.buildingLights = this.add.container(0, 0).setDepth(55000);
+    this.townLights = this.add.container(0, 0).setDepth(55000);
 
     // Comercios: Bolsa (acciones), Banco (bonos) y Almacen (materias primas).
     this.shops = [
@@ -131,13 +142,23 @@ export class WorldScene extends Phaser.Scene {
       // Vendedor parado frente al comercio.
       const npc = this.add.image(shop.x, shop.y + 8, shopNpc[shop.kind]).setOrigin(0.5, 1).setDepth(shop.y + 8);
       this.tweens.add({ targets: npc, y: npc.y - 1.5, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+      // Farol del comercio (se prende de noche).
+      this.addLight(this.townLights, shop.x, shop.y - 12, 1.6);
     }
 
-    // Solidos fijos (colisiones): comercios, fuente y arboles.
+    // Luces fijas: la fuente y faroles en los cuatro portones de la muralla.
+    this.addLight(this.townLights, cx, cy - 6, 1.4);
+    for (const [dc, dr] of [[0, -WALL_HALF], [0, WALL_HALF], [-WALL_HALF, 0], [WALL_HALF, 0]] as const) {
+      this.addLight(this.townLights, cx + dc * TILE, cy + dr * TILE, 1.3);
+    }
+
+    // Solidos fijos (colisiones): comercios, fuente, arboles, muralla y agua.
     this.staticSolids = [
       ...this.shops.map((s) => ({ x: s.x, y: s.y - 8, r: 13 })),
       { x: cx, y: cy - 4, r: 8 },
       ...this.treeSolids,
+      ...this.wallSolids,
+      ...this.waterSolids,
     ];
 
     // Heroe (en la posicion guardada, o en la plaza).
@@ -180,12 +201,41 @@ export class WorldScene extends Phaser.Scene {
         }
       }
     }
-    // Un estanque en una esquina.
+    // Un estanque (agua) que no se puede atravesar.
+    this.waterSolids = [];
     for (let r = 5; r < 12; r++) {
       for (let c = 6; c < 14; c++) {
         if (Math.hypot(c - 10, r - 8) < 4) {
           this.add.image(c * TILE, r * TILE, "water").setOrigin(0, 0).setDepth(-998);
+          this.waterSolids.push({ x: c * TILE + TILE / 2, y: r * TILE + TILE / 2, r: 9 });
         }
+      }
+    }
+  }
+
+  // Muralla de piedra alrededor del pueblo, con portones donde pasan los caminos.
+  private paintWalls(cx: number, cy: number) {
+    const midC = Math.round(cx / TILE);
+    const midR = Math.round(cy / TILE);
+    this.wallSolids = [];
+    const place = (c: number, r: number) => {
+      const x = c * TILE + TILE / 2;
+      const y = r * TILE + TILE / 2;
+      this.add.image(c * TILE, r * TILE, "wall").setOrigin(0, 0).setDepth(y);
+      this.wallSolids.push({ x, y, r: 8 });
+    };
+    for (let c = midC - WALL_HALF; c <= midC + WALL_HALF; c++) {
+      const gate = Math.abs(c - midC) <= 1; // porton norte/sur (por el camino)
+      if (!gate) {
+        place(c, midR - WALL_HALF);
+        place(c, midR + WALL_HALF);
+      }
+    }
+    for (let r = midR - WALL_HALF + 1; r <= midR + WALL_HALF - 1; r++) {
+      const gate = Math.abs(r - midR) <= 1; // porton este/oeste
+      if (!gate) {
+        place(midC - WALL_HALF, r);
+        place(midC + WALL_HALF, r);
       }
     }
   }
@@ -228,26 +278,22 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  // Parcelas del pueblo en espiral desde el centro (se van llenando al crecer).
+  // Parcelas del pueblo: grilla DENTRO de la muralla, a los lados de los
+  // caminos. Se ordenan de adentro hacia afuera (el pueblo crece desde el centro).
   private computePlots(cx: number, cy: number) {
-    const step = 3 * TILE;
-    const ring: Array<{ x: number; y: number; r: number }> = [];
-    for (let radius = 1; radius <= 8; radius++) {
-      const n = radius * 6;
-      for (let k = 0; k < n; k++) {
-        const ang = (k / n) * Math.PI * 2 + radius * 0.5;
-        const x = cx + Math.cos(ang) * radius * step * 0.55;
-        const y = cy + Math.sin(ang) * radius * step * 0.45;
-        if (x < TILE * 2 || x > WORLD_W - TILE * 2) continue;
-        if (y < TILE * 2 || y > WORLD_H - TILE * 2) continue;
-        // Evita el centro (fuente) y el estanque.
-        if (Math.hypot(x - cx, y - cy) < step) continue;
-        // Evita solaparse con los comercios.
+    const plots: Array<{ x: number; y: number; r: number }> = [];
+    for (let dr = -(WALL_HALF - 2); dr <= WALL_HALF - 2; dr += 2) {
+      for (let dc = -(WALL_HALF - 2); dc <= WALL_HALF - 2; dc += 2) {
+        if (Math.abs(dc) <= 1 || Math.abs(dr) <= 1) continue; // deja libres los caminos
+        const x = cx + dc * TILE;
+        const y = cy + dr * TILE;
+        if (Math.hypot(x - cx, y - cy) < 2.5 * TILE) continue; // fuente/plaza
         if (this.shops.some((s) => Math.hypot(x - s.x, y - s.y) < 2 * TILE)) continue;
-        ring.push({ x: Math.round(x), y: Math.round(y), r: radius });
+        plots.push({ x, y, r: Math.max(Math.abs(dc), Math.abs(dr)) });
       }
     }
-    this.plots = ring;
+    plots.sort((a, b) => a.r - b.r);
+    this.plots = plots;
   }
 
   // Reconstruye el pueblo cuando cambia el numero de edificios (patrimonio).
@@ -261,12 +307,15 @@ export class WorldScene extends Phaser.Scene {
     this.buildings.removeAll(true);
 
     const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
+    this.buildingLights.removeAll(true);
     for (let i = 0; i < count; i++) {
       const plot = this.plots[i];
       const key = buildingKey(p, i);
       const img = this.add.image(plot.x, plot.y, key).setOrigin(0.5, 1).setDepth(plot.y);
       this.buildings.add(img);
       buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
+      // Ventana iluminada de cada casa (se prende de noche).
+      this.addLight(this.buildingLights, plot.x, plot.y - 10, 1);
       // Animacion de "construccion" para los que aparecen nuevos.
       if (grew && i >= from) {
         img.setScale(0.2).setAlpha(0.4);
@@ -284,6 +333,16 @@ export class WorldScene extends Phaser.Scene {
       this.cameras.main.flash(350, 120, 170, 255);
     }
     this.lastTier = tier;
+  }
+
+  // Agrega una lucecita (brillo aditivo calido) a un contenedor de luces.
+  private addLight(container: Phaser.GameObjects.Container, x: number, y: number, scale = 1.5) {
+    const img = this.add
+      .image(x, y, "glow")
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setTint(0xffd98a)
+      .setScale(scale);
+    container.add(img);
   }
 
   // Cuanto solapa la posicion (x,y) con los edificios/comercios (0 = libre).
@@ -377,10 +436,27 @@ export class WorldScene extends Phaser.Scene {
       this.hud.openShop(this.nearShop.kind);
     }
 
-    // Ciclo dia/noche: la capa azul se oscurece de noche (ciclo ~100 s).
-    const CYCLE = 100000;
-    const nightness = (1 - Math.cos((( _t % CYCLE) / CYCLE) * Math.PI * 2)) / 2;
-    this.night.setAlpha(nightness * 0.5);
+    // Dia/noche segun la hora REAL de Argentina (ciclo de 24 h).
+    const nightness = this.nightnessNow();
+    this.night.setAlpha(nightness * 0.55);
+    // Las lucecitas se prenden a medida que baja la luz.
+    const lightOn = Math.max(0, (nightness - 0.2) / 0.8);
+    this.townLights.setAlpha(lightOn);
+    this.buildingLights.setAlpha(lightOn);
+  }
+
+  // Oscuridad [0..1] segun la hora de Argentina (UTC-3): 0 = mediodia,
+  // 1 = madrugada. Se puede forzar con ?hour=NN para pruebas.
+  private nightnessNow(): number {
+    let h: number;
+    if (this.testHour != null) {
+      h = this.testHour;
+    } else {
+      const now = new Date();
+      h = ((now.getUTCHours() + now.getUTCMinutes() / 60 - 3) % 24 + 24) % 24;
+    }
+    // Mas claro al mediodia (~14 h), mas oscuro de madrugada (~2 h).
+    return (1 - Math.cos(((h - 14) / 24) * Math.PI * 2)) / 2;
   }
 }
 
