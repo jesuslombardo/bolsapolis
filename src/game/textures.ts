@@ -58,7 +58,7 @@ function makeGrass(scene: Phaser.Scene, key: string, base: number, spec: number,
   g.destroy();
 }
 
-export function buildTextures(scene: Phaser.Scene) {
+export function buildTextures(scene: Phaser.Scene, hairColor = 0x4a2f1c) {
   makeGlow(scene);
   // --- Suelos ---
   makeGrass(scene, "grass0", 0x3f7a34, 0x4c8c3d, 11);
@@ -338,9 +338,14 @@ export function buildTextures(scene: Phaser.Scene) {
   ], well);
 
   // --- Personaje (4 direcciones, base pixel) ---
+  // El color de pelo viene de la creacion de personaje: forzamos el rebuild
+  // de las texturas del heroe para que se aplique.
+  for (const k of ["hero_down", "hero_up", "hero_side"]) {
+    if (scene.textures.exists(k)) scene.textures.remove(k);
+  }
   const P: Palette = {
     e: 0xf0c39b, // piel
-    h: 0x4a2f1c, // pelo
+    h: hairColor, // pelo (elegido por el jugador)
     u: 0x2f6bbf, // tunica
     U: 0x24528f, // tunica sombra
     p: 0x3a2a18, // botas

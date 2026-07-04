@@ -11,7 +11,7 @@ import { makeRng, gaussian } from "./rng.ts";
 // que el mismo codigo sirve como reducer autoritativo en el servidor y como
 // prediccion optimista en el cliente.
 
-const STARTING_CASH_CENTS = 1_000_000; // 10.000 unidades de moneda
+const STARTING_CASH_CENTS = 10_000_000; // $100.000 (representan 100 mil dolares)
 
 export function createInitialState(seed: number, playerId = "p1", playerName = "Tu"): GameState {
   const stocks: Record<string, Stock> = {};
@@ -28,9 +28,9 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
   // que la ciudad reaccione al mercado desde el primer segundo (si esperas sin
   // hacer nada, igual la ves subir y bajar). El resto queda en efectivo.
   const seededHoldings: Array<[string, number]> = [
-    ["GRANO", 40],
-    ["LADRI", 20],
-    ["BONOR", 8],
+    ["GRANO", 200],
+    ["LADRI", 150],
+    ["BONOR", 60],
   ];
   const holdings: Record<string, Holding> = {};
   let spent = 0;

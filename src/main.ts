@@ -2,7 +2,11 @@ import Phaser from "phaser";
 import { createLocalRuntime } from "./game/runtime.ts";
 import { WorldScene } from "./game/WorldScene.ts";
 import { mountHud } from "./ui/hud.ts";
+import { mountAuth } from "./ui/auth.ts";
 import { loadSave, writeSave } from "./game/save.ts";
+import { createInitialState } from "./sim/engine.ts";
+import type { Profile } from "./game/account.ts";
+import { money } from "./ui/format.ts";
 
 // Garantiza el escalado correcto en movil (por si el host no inyecta viewport).
 if (!document.querySelector("meta[name=viewport]")) {
@@ -12,51 +16,67 @@ if (!document.querySelector("meta[name=viewport]")) {
   document.head.appendChild(meta);
 }
 
-// Seed fija por ahora para partidas reproducibles durante el desarrollo.
-// En multiplayer la asignara el servidor al crear la sala.
 const SEED = 20260703;
-
-// Carga la partida guardada, si existe.
-const saved = loadSave();
-const runtime = createLocalRuntime({ seed: SEED, tickMs: 700, initialState: saved?.state });
-
-const gameEl = document.getElementById("game")!;
 const appEl = document.getElementById("app")!;
+const gameEl = document.getElementById("game")!;
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: gameEl,
-  backgroundColor: "#243b26",
-  pixelArt: true,
-  scale: {
-    mode: Phaser.Scale.RESIZE,
-    width: "100%",
-    height: "100%",
-  },
-});
+// Primero la pantalla de cuenta; cuando hay sesion lista, arranca el juego.
+mountAuth(appEl, startGame);
 
-const hud = mountHud(appEl, runtime, "p1");
-const worldScene = new WorldScene();
-game.scene.add("world", worldScene, true, {
-  runtime,
-  hud,
-  playerId: "p1",
-  heroStart: saved?.hero ?? null,
-});
-runtime.start();
+function startGame(profile: Profile) {
+  // Carga la partida del perfil (o crea una nueva con $100.000).
+  const saved = loadSave(profile.email);
+  let initialState = saved?.state ?? createInitialState(SEED, "p1", profile.name);
+  let offlineGain = 0;
 
-// Autoguardado: cada 4 s y al cerrar/ocultar la pestanya.
-function save() {
-  writeSave(runtime.getState(), worldScene.getHeroPos());
-}
-setInterval(save, 4000);
-window.addEventListener("beforeunload", save);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") save();
-});
+  // Crecimiento offline del ahorro: rindio mientras no estabas (tope 7 dias).
+  if (saved) {
+    const days = Math.min((Date.now() - saved.ts) / 86_400_000, 7);
+    const player = initialState.players.p1;
+    if (player && player.savingsCents > 0 && days > 0.02) {
+      offlineGain = Math.round(player.savingsCents * 0.05 * days);
+      initialState = {
+        ...initialState,
+        players: { ...initialState.players, p1: { ...player, savingsCents: player.savingsCents + offlineGain } },
+      };
+    }
+  }
 
-// Gancho de depuracion solo en desarrollo (util para probar niveles de ciudad
-// sin tener que operar durante minutos). No se incluye en el build de produccion.
-if (import.meta.env.DEV) {
-  (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game, hud, worldScene };
+  const runtime = createLocalRuntime({ seed: SEED, tickMs: 700, initialState });
+
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: gameEl,
+    backgroundColor: "#243b26",
+    pixelArt: true,
+    scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
+  });
+
+  const hud = mountHud(appEl, runtime, "p1", profile.name, profile.email);
+
+  const worldScene = new WorldScene();
+  game.scene.add("world", worldScene, true, {
+    runtime,
+    hud,
+    playerId: "p1",
+    heroStart: saved?.hero ?? null,
+    hairColor: profile.hairColor,
+  });
+  runtime.start();
+
+  if (offlineGain > 0) {
+    hud.toast(`Mientras no estabas, tu ahorro rindió ${money(offlineGain)} 💰`, "good");
+  }
+
+  // Autoguardado por cuenta: cada 4 s y al cerrar/ocultar la pestanya.
+  const save = () => writeSave(profile.email, runtime.getState(), worldScene.getHeroPos());
+  setInterval(save, 4000);
+  window.addEventListener("beforeunload", save);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") save();
+  });
+
+  if (import.meta.env.DEV) {
+    (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game, hud, worldScene };
+  }
 }

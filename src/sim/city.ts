@@ -11,8 +11,10 @@ import { netWorthCents } from "./engine.ts";
 
 // Rango de patrimonio (en unidades de moneda) mapeado a la ciudad.
 // Empiezas con 10.000 -> ya se ve un pueblo, no un descampado.
-const WEALTH_MIN = 6_000;
-const WEALTH_MAX = 90_000;
+// Reescalado a la economia de $100.000 de arranque: la ciudad crece desde
+// ~$90k (recien empezas) hasta ~$2.5M (metropoli).
+const WEALTH_MIN = 90_000;
+const WEALTH_MAX = 2_500_000;
 
 const TIER_NAMES = [
   "Paraje",

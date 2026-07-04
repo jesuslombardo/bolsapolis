@@ -2,10 +2,12 @@ import type { AssetKind, GameState } from "../sim/types.ts";
 import type { Runtime } from "../game/runtime.ts";
 import { netWorthCents, holdingsValueCents } from "../sim/engine.ts";
 import { prosperityOf, tierNameForProsperity } from "../sim/city.ts";
+import { levelOf } from "../sim/progress.ts";
 import { ASSET_DEFS, defsForKind } from "../sim/market.ts";
 import { touchMove, isTouchDevice } from "../game/input.ts";
 import { sfx } from "../game/audio.ts";
 import { clearSave } from "../game/save.ts";
+import { logout } from "../game/account.ts";
 import { money, pct } from "./format.ts";
 
 // Interfaz RPG superpuesta sobre el mundo:
@@ -29,7 +31,14 @@ export interface HudApi {
   toast(msg: string, kind?: "info" | "good" | "bad"): void;
 }
 
-export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): HudApi {
+export function mountHud(
+  root: HTMLElement,
+  runtime: Runtime,
+  playerId = "p1",
+  profileName = "Tu",
+  accountEmail = "",
+): HudApi {
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
   // --- Barra de estado (arriba izquierda) ---
   const statusBar = el(root, "div", {
     position: "fixed",
@@ -50,16 +59,17 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
   });
 
   // --- Botones (arriba derecha): Misiones + Inventario ---
-  const bagBtn = btn(root, "🎒 Inventario", {
+  // En pantallas chicas van compactos (solo icono) para no pisar la barra.
+  const bagBtn = btn(root, narrow ? "🎒" : "🎒 Inventario", {
     position: "fixed",
     top: "12px",
     right: "12px",
     zIndex: "30",
   });
-  const missionsBtn = btn(root, "🎯 Misiones", {
+  const missionsBtn = btn(root, narrow ? "🎯" : "🎯 Misiones", {
     position: "fixed",
     top: "12px",
-    right: "160px",
+    right: narrow ? "62px" : "160px",
     background: "#26325c",
     zIndex: "30",
   });
@@ -157,9 +167,10 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     { id: "commodity", label: "Compra dolar, soja u oro (Almacen)", done: (s) => ownsKind(s, "commodity") },
     { id: "savings", label: "Guarda plata en la Caja de Ahorro", done: (s) => s.players[playerId].savingsCents > 0 },
     { id: "pueblo", label: "Haces crecer tu pueblo a Pueblo", done: (s) => tierIndex(s) >= 1 },
-    { id: "w50", label: "Junta $50.000 de patrimonio", done: (s) => netWorthCents(s, playerId) >= 5_000_000 },
+    { id: "w150", label: "Junta $150.000 (Nivel 2)", done: (s) => netWorthCents(s, playerId) >= 15_000_000 },
     { id: "ciudad", label: "Llega a Ciudad", done: (s) => tierIndex(s) >= 3 },
-    { id: "w100", label: "Junta $100.000 de patrimonio", done: (s) => netWorthCents(s, playerId) >= 10_000_000 },
+    { id: "w500", label: "Junta $500.000 de patrimonio", done: (s) => netWorthCents(s, playerId) >= 50_000_000 },
+    { id: "millon", label: "Llega a $1.000.000 (¡millonario!)", done: (s) => netWorthCents(s, playerId) >= 100_000_000 },
     { id: "capital", label: "Converti tu pueblo en Capital", done: (s) => tierIndex(s) >= 5 },
   ];
   const missionsDone = new Set<string>();
@@ -454,20 +465,27 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     });
     container.querySelectorAll<HTMLButtonElement>("[data-reset]").forEach((b) => {
       b.onclick = () => {
-        if (confirm("¿Reiniciar la partida? Se perdera el progreso guardado.")) {
-          clearSave();
+        if (confirm("¿Reiniciar la partida? Se perdera el progreso guardado de este personaje.")) {
+          if (accountEmail) clearSave(accountEmail);
           location.reload();
         }
+      };
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-logout]").forEach((b) => {
+      b.onclick = () => {
+        logout();
+        location.reload();
       };
     });
   }
 
   let lastTier = "";
+  let lastLevel = 0;
   function render(state: GameState) {
     const player = state.players[playerId];
-    const net = netWorthCents(state, playerId);
     const prosperity = prosperityOf(state, playerId);
     const tier = tierNameForProsperity(prosperity);
+    const level = levelOf(state, playerId);
 
     // Subida de nivel de la ciudad: aviso + sonido.
     if (lastTier && tier !== lastTier) {
@@ -475,6 +493,13 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       toast(`¡Tu ciudad crecio a ${tier}!`, "good");
     }
     lastTier = tier;
+
+    // Subida de NIVEL del jugador.
+    if (lastLevel && level > lastLevel) {
+      sfx.levelup();
+      toast(`⭐ ¡Subiste a Nivel ${level}!`, "good");
+    }
+    lastLevel = level;
 
     // Noticias de mercado: barra + aviso cuando aparece una nueva.
     const headline = state.event?.headline ?? "";
@@ -516,16 +541,18 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
             <span style="flex:1;color:${done ? "#a7e6bd" : "#dfe6ff"}">${m.label}</span>
           </div>`;
         }).join("") +
-        `<button data-reset="1" style="margin-top:14px;width:100%;cursor:pointer;border:1px solid #6a3140;border-radius:8px;padding:10px;background:#2a1620;color:#ffb3c0;font-weight:700">🔄 Reiniciar partida</button>`;
+        `<div style="display:flex;gap:8px;margin-top:14px">
+          <button data-logout="1" style="flex:1;cursor:pointer;border:1px solid #33406b;border-radius:8px;padding:10px;background:#1b2440;color:#dfe6ff;font-weight:700">🚪 Cerrar sesión</button>
+          <button data-reset="1" style="flex:1;cursor:pointer;border:1px solid #6a3140;border-radius:8px;padding:10px;background:#2a1620;color:#ffb3c0;font-weight:700">🔄 Reiniciar</button>
+        </div>`;
       wire(missionsWin.body);
     }
 
     statusBar.innerHTML = `
-      <span style="display:flex;gap:6px;align-items:center"><span style="font-size:17px">💰</span><b style="color:#ffe08a;font-size:16px">${money(player.cashCents)}</b></span>
-      <span style="opacity:.35">|</span>
-      <span style="color:#9fb0dd;font-size:12px">Patrimonio <b style="color:#eaf0ff;font-size:14px">${money(net)}</b></span>
-      <span style="opacity:.35">|</span>
-      <span style="color:#8fb2ff">🏛️ ${tier}</span>`;
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div style="display:flex;gap:6px;align-items:center"><span style="font-size:17px">💰</span><b style="color:#ffe08a;font-size:17px">${money(player.cashCents)}</b></div>
+        <div style="font-size:11px;color:#9fb0dd">👤 ${profileName} · <span style="color:#8fb2ff">Nivel ${level}</span></div>
+      </div>`;
 
     if (invOpen) {
       if (detailId) {

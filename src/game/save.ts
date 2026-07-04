@@ -1,9 +1,11 @@
 import type { GameState } from "../sim/types.ts";
+import { lsGet, lsSet, lsRemove } from "./storage.ts";
 
-// Guardado de partida en localStorage. Como la simulacion es serializable
-// (objeto plano), guardamos el estado completo + la posicion del heroe.
+// Guardado de partida por cuenta (en localStorage). Como la simulacion es
+// serializable (objeto plano), guardamos el estado completo + la posicion del
+// heroe + la marca de tiempo (para el crecimiento offline del ahorro).
 
-const KEY = "bolsapolis.save.v2";
+const PREFIX = "bolsapolis.save.";
 
 export interface SaveData {
   state: GameState;
@@ -11,9 +13,13 @@ export interface SaveData {
   ts: number;
 }
 
-export function loadSave(): SaveData | null {
+function keyFor(email: string): string {
+  return PREFIX + email.trim().toLowerCase();
+}
+
+export function loadSave(email: string): SaveData | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = lsGet(keyFor(email));
     if (!raw) return null;
     const d = JSON.parse(raw) as SaveData;
     if (!d || !d.state || !d.state.stocks || !d.state.players) return null;
@@ -23,17 +29,17 @@ export function loadSave(): SaveData | null {
   }
 }
 
-export function writeSave(state: GameState, hero: { x: number; y: number } | null) {
+export function writeSave(email: string, state: GameState, hero: { x: number; y: number } | null) {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ state, hero, ts: Date.now() }));
+    lsSet(keyFor(email), JSON.stringify({ state, hero, ts: Date.now() }));
   } catch {
     /* almacenamiento no disponible */
   }
 }
 
-export function clearSave() {
+export function clearSave(email: string) {
   try {
-    localStorage.removeItem(KEY);
+    lsRemove(keyFor(email));
   } catch {
     /* ignore */
   }

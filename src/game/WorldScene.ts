@@ -65,11 +65,20 @@ export class WorldScene extends Phaser.Scene {
     super("world");
   }
 
-  init(data: { runtime: Runtime; hud: HudApi; playerId?: string; heroStart?: { x: number; y: number } | null }) {
+  private hairColor = 0x4a2f1c;
+
+  init(data: {
+    runtime: Runtime;
+    hud: HudApi;
+    playerId?: string;
+    heroStart?: { x: number; y: number } | null;
+    hairColor?: number;
+  }) {
     this.runtime = data.runtime;
     this.hud = data.hud;
     if (data.playerId) this.playerId = data.playerId;
     this.heroStart = data.heroStart ?? null;
+    if (typeof data.hairColor === "number") this.hairColor = data.hairColor;
   }
 
   /** Posicion actual del heroe (para guardar la partida). */
@@ -78,7 +87,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   create() {
-    buildTextures(this);
+    buildTextures(this, this.hairColor);
     const hourParam = new URLSearchParams(location.search).get("hour");
     if (hourParam != null && !Number.isNaN(parseFloat(hourParam))) this.testHour = parseFloat(hourParam);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
