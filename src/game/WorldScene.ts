@@ -3,6 +3,7 @@ import type { GameState } from "../sim/types.ts";
 import { prosperityOf } from "../sim/city.ts";
 import type { Runtime } from "./runtime.ts";
 import { buildTextures } from "./textures.ts";
+import { touchMove } from "./input.ts";
 
 // Mundo cenital estilo Argentum Online: caminas con un personaje por un mapa
 // de tiles y tu pueblo crece con tu patrimonio (de aldea a metropoli).
@@ -172,7 +173,11 @@ export class WorldScene extends Phaser.Scene {
     if (up) vy -= 1;
     if (down) vy += 1;
 
-    if (vx !== 0 || vy !== 0) {
+    // Suma el joystick tactil (movil).
+    vx += touchMove.x;
+    vy += touchMove.y;
+
+    if (Math.abs(vx) > 0.001 || Math.abs(vy) > 0.001) {
       const len = Math.hypot(vx, vy);
       this.hero.x = Phaser.Math.Clamp(this.hero.x + (vx / len) * SPEED * dt, TILE, WORLD_W - TILE);
       this.hero.y = Phaser.Math.Clamp(this.hero.y + (vy / len) * SPEED * dt, TILE, WORLD_H - TILE);

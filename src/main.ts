@@ -3,6 +3,14 @@ import { createLocalRuntime } from "./game/runtime.ts";
 import { WorldScene } from "./game/WorldScene.ts";
 import { mountHud } from "./ui/hud.ts";
 
+// Garantiza el escalado correcto en movil (por si el host no inyecta viewport).
+if (!document.querySelector("meta[name=viewport]")) {
+  const meta = document.createElement("meta");
+  meta.name = "viewport";
+  meta.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
+  document.head.appendChild(meta);
+}
+
 // Seed fija por ahora para partidas reproducibles durante el desarrollo.
 // En multiplayer la asignara el servidor al crear la sala.
 const SEED = 20260703;

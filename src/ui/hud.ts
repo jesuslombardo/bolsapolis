@@ -3,6 +3,7 @@ import type { Runtime } from "../game/runtime.ts";
 import { netWorthCents, holdingsValueCents } from "../sim/engine.ts";
 import { prosperityOf, tierNameForProsperity } from "../sim/city.ts";
 import { STOCK_DEFS } from "../sim/market.ts";
+import { touchMove, isTouchDevice } from "../game/input.ts";
 import { money, pct } from "./format.ts";
 
 // Interfaz de juego (estilo RPG): superpuesta sobre el mundo, no en un panel
@@ -70,18 +71,22 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1") {
   const summary = el(panel, "div", {});
   const list = el(panel, "div", {});
 
-  let open = true;
+  const narrow = window.matchMedia("(max-width: 720px)").matches;
+  let open = !narrow; // en el movil arranca cerrado para ver el mundo
   function setOpen(v: boolean) {
     open = v;
     panel.style.transform = open ? "translateX(0)" : "translateX(100%)";
     toggle.textContent = open ? "Cerrar Bolsa  ✕" : "Bolsa  📈";
   }
-  setOpen(true);
+  setOpen(open);
   toggle.onclick = () => setOpen(!open);
   window.addEventListener("keydown", (e) => {
     if (e.key === "b" || e.key === "B") setOpen(!open);
     if (e.key === "Escape") setOpen(false);
   });
+
+  // --- Joystick tactil (movil): mueve al personaje con el dedo ---
+  if (isTouchDevice()) mountJoystick(root);
 
   function order(stockId: string, type: "BUY" | "SELL") {
     runtime.send({ type, playerId, stockId, shares: TRADE_SIZE });
@@ -147,6 +152,74 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1") {
   }
 
   runtime.subscribe(render);
+}
+
+// Joystick virtual: base fija abajo-izquierda con un knob arrastrable.
+// Escribe el vector normalizado en touchMove, que WorldScene lee cada frame.
+function mountJoystick(root: HTMLElement) {
+  const R = 56; // radio de la base
+  const base = el(root, "div", {
+    position: "fixed",
+    left: "22px",
+    bottom: "26px",
+    width: R * 2 + "px",
+    height: R * 2 + "px",
+    borderRadius: "50%",
+    background: "rgba(10,16,32,.35)",
+    border: "2px solid rgba(150,180,255,.5)",
+    touchAction: "none",
+    zIndex: "40",
+    userSelect: "none",
+  });
+  const knob = el(base, "div", {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: "52px",
+    height: "52px",
+    marginLeft: "-26px",
+    marginTop: "-26px",
+    borderRadius: "50%",
+    background: "rgba(80,130,255,.85)",
+    boxShadow: "0 2px 8px rgba(0,0,0,.4)",
+    transition: "transform .05s",
+  });
+
+  let active = false;
+  const rect = () => base.getBoundingClientRect();
+
+  function move(clientX: number, clientY: number) {
+    const r = rect();
+    let dx = clientX - (r.left + R);
+    let dy = clientY - (r.top + R);
+    const d = Math.hypot(dx, dy);
+    const max = R;
+    if (d > max) {
+      dx = (dx / d) * max;
+      dy = (dy / d) * max;
+    }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    touchMove.x = dx / max;
+    touchMove.y = dy / max;
+  }
+  function reset() {
+    active = false;
+    knob.style.transform = "translate(0px, 0px)";
+    touchMove.x = 0;
+    touchMove.y = 0;
+  }
+
+  base.addEventListener("pointerdown", (e) => {
+    active = true;
+    base.setPointerCapture(e.pointerId);
+    move(e.clientX, e.clientY);
+  });
+  base.addEventListener("pointermove", (e) => {
+    if (active) move(e.clientX, e.clientY);
+  });
+  base.addEventListener("pointerup", reset);
+  base.addEventListener("pointercancel", reset);
+  base.addEventListener("lostpointercapture", reset);
 }
 
 // Crea un elemento con estilos inline y lo agrega al padre.
