@@ -45,6 +45,9 @@ export class WorldScene extends Phaser.Scene {
   private shops: Shop[] = [];
   private interactKey!: Phaser.Input.Keyboard.Key;
   private nearShop: Shop | null = null;
+  private staticSolids: Array<{ x: number; y: number; r: number }> = [];
+  private solids: Array<{ x: number; y: number; r: number }> = [];
+  private lastTier = "";
 
   constructor() {
     super("world");
@@ -81,7 +84,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.computePlots(cx, cy);
 
-    // Dibuja los comercios con su cartel flotante.
+    // Dibuja los comercios con su cartel flotante y su vendedor (NPC).
     for (const shop of this.shops) {
       this.add.image(shop.x, shop.y, shop.tex).setOrigin(0.5, 1).setDepth(shop.y);
       const label = this.add
@@ -95,7 +98,17 @@ export class WorldScene extends Phaser.Scene {
         .setDepth(9999)
         .setResolution(3);
       label.setScale(1 / this.cameras.main.zoom);
+      // Vendedor parado frente al comercio.
+      const npcTex = shop.kind === "stock" ? "npc_merchant" : "npc_banker";
+      const npc = this.add.image(shop.x, shop.y + 8, npcTex).setOrigin(0.5, 1).setDepth(shop.y + 8);
+      this.tweens.add({ targets: npc, y: npc.y - 1.5, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     }
+
+    // Solidos fijos (colisiones): comercios y fuente.
+    this.staticSolids = [
+      ...this.shops.map((s) => ({ x: s.x, y: s.y - 8, r: 13 })),
+      { x: cx, y: cy - 4, r: 8 },
+    ];
 
     // Heroe.
     this.hero = this.add.image(cx, cy + 44, "hero_down").setDepth(cy + 44);
@@ -185,18 +198,40 @@ export class WorldScene extends Phaser.Scene {
     const from = Math.max(0, this.lastCount);
     this.buildings.removeAll(true);
 
+    const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
     for (let i = 0; i < count; i++) {
       const plot = this.plots[i];
       const key = buildingKey(p, i);
       const img = this.add.image(plot.x, plot.y, key).setOrigin(0.5, 1).setDepth(plot.y);
       this.buildings.add(img);
+      buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
       // Animacion de "construccion" para los que aparecen nuevos.
       if (grew && i >= from) {
         img.setScale(0.2).setAlpha(0.4);
         this.tweens.add({ targets: img, scale: 1, alpha: 1, duration: 260, ease: "Back.easeOut" });
       }
     }
+    this.solids = [...this.staticSolids, ...buildingSolids];
     this.lastCount = count;
+
+    // Subida de nivel de la ciudad: destello de camara (el aviso + sonido los
+    // maneja el HUD, que ve cada cambio de estado).
+    const tier = tierName(p);
+    if (this.lastTier && tier !== this.lastTier) {
+      this.cameras.main.flash(350, 120, 170, 255);
+    }
+    this.lastTier = tier;
+  }
+
+  // Cuanto solapa la posicion (x,y) con los edificios/comercios (0 = libre).
+  // El radio del heroe es ~4.
+  private penetration(x: number, y: number): number {
+    let total = 0;
+    for (const s of this.solids) {
+      const overlap = s.r + 4 - Math.hypot(x - s.x, y - s.y);
+      if (overlap > 0) total += overlap;
+    }
+    return total;
   }
 
   update(_t: number, delta: number) {
@@ -219,8 +254,16 @@ export class WorldScene extends Phaser.Scene {
 
     if (Math.abs(vx) > 0.001 || Math.abs(vy) > 0.001) {
       const len = Math.hypot(vx, vy);
-      this.hero.x = Phaser.Math.Clamp(this.hero.x + (vx / len) * SPEED * dt, TILE, WORLD_W - TILE);
-      this.hero.y = Phaser.Math.Clamp(this.hero.y + (vy / len) * SPEED * dt, TILE, WORLD_H - TILE);
+      const stepX = (vx / len) * SPEED * dt;
+      const stepY = (vy / len) * SPEED * dt;
+      // Colision por eje: permite deslizarse a lo largo de las paredes.
+      // Colision por eje basada en penetracion: se permite el movimiento
+      // mientras no aumente el solape con los edificios (asi bloquea la entrada
+      // pero siempre deja salir si un edificio apareciera encima).
+      const tryX = Phaser.Math.Clamp(this.hero.x + stepX, TILE, WORLD_W - TILE);
+      if (this.penetration(tryX, this.hero.y) <= this.penetration(this.hero.x, this.hero.y)) this.hero.x = tryX;
+      const tryY = Phaser.Math.Clamp(this.hero.y + stepY, TILE, WORLD_H - TILE);
+      if (this.penetration(this.hero.x, tryY) <= this.penetration(this.hero.x, this.hero.y)) this.hero.y = tryY;
       this.hero.setDepth(this.hero.y);
 
       // Orientacion: el eje dominante manda.

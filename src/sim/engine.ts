@@ -1,5 +1,5 @@
 import type { Command, GameState, Holding, PlayerState, Stock } from "./types.ts";
-import { HISTORY_LEN } from "./types.ts";
+import { HISTORY_LEN, SAVINGS_RATE } from "./types.ts";
 import { ASSET_DEFS } from "./market.ts";
 import { makeRng, gaussian } from "./rng.ts";
 
@@ -43,6 +43,7 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
     id: playerId,
     name: playerName,
     cashCents: STARTING_CASH_CENTS - spent,
+    savingsCents: 0,
     holdings,
   };
   return { tick: 0, seed, stocks, players: { [playerId]: player } };
@@ -69,13 +70,47 @@ export function tick(state: GameState): GameState {
     if (history.length > HISTORY_LEN) history.shift();
     stocks[def.id] = { ...prev, priceCents, history };
   });
-  return { ...state, tick: nextTick, stocks };
+
+  // Interes compuesto sobre la caja de ahorro de cada jugador.
+  const players: Record<string, PlayerState> = {};
+  for (const [id, p] of Object.entries(state.players)) {
+    const interest = Math.floor(p.savingsCents * SAVINGS_RATE);
+    players[id] = interest > 0 ? { ...p, savingsCents: p.savingsCents + interest } : p;
+  }
+
+  return { ...state, tick: nextTick, stocks, players };
 }
 
 export function applyCommand(state: GameState, cmd: Command): GameState {
   const player = state.players[cmd.playerId];
+  if (!player) return state;
+
+  // Caja de ahorro: mover oro entre efectivo y ahorro.
+  if (cmd.type === "DEPOSIT" || cmd.type === "WITHDRAW") {
+    const amount = Math.floor(cmd.amountCents);
+    if (amount <= 0) return state;
+    if (cmd.type === "DEPOSIT") {
+      const moved = Math.min(amount, player.cashCents);
+      if (moved <= 0) return state;
+      const nextPlayer: PlayerState = {
+        ...player,
+        cashCents: player.cashCents - moved,
+        savingsCents: player.savingsCents + moved,
+      };
+      return { ...state, players: { ...state.players, [cmd.playerId]: nextPlayer } };
+    }
+    const moved = Math.min(amount, player.savingsCents);
+    if (moved <= 0) return state;
+    const nextPlayer: PlayerState = {
+      ...player,
+      cashCents: player.cashCents + moved,
+      savingsCents: player.savingsCents - moved,
+    };
+    return { ...state, players: { ...state.players, [cmd.playerId]: nextPlayer } };
+  }
+
   const stock = state.stocks[cmd.stockId];
-  if (!player || !stock || cmd.shares <= 0) return state;
+  if (!stock || cmd.shares <= 0) return state;
   const shares = Math.floor(cmd.shares);
   if (shares <= 0) return state;
 
@@ -124,5 +159,5 @@ export function holdingsValueCents(state: GameState, playerId: string): number {
 export function netWorthCents(state: GameState, playerId: string): number {
   const player = state.players[playerId];
   if (!player) return 0;
-  return player.cashCents + holdingsValueCents(state, playerId);
+  return player.cashCents + player.savingsCents + holdingsValueCents(state, playerId);
 }

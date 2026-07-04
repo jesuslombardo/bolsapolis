@@ -36,6 +36,8 @@ export interface PlayerState {
   id: string;
   name: string;
   cashCents: number;
+  /** Oro en la caja de ahorro del Banco (genera interes cada tick). */
+  savingsCents: number;
   holdings: Record<string, Holding>;
 }
 
@@ -48,6 +50,11 @@ export interface GameState {
 
 export type Command =
   | { type: "BUY"; playerId: string; stockId: string; shares: number }
-  | { type: "SELL"; playerId: string; stockId: string; shares: number };
+  | { type: "SELL"; playerId: string; stockId: string; shares: number }
+  | { type: "DEPOSIT"; playerId: string; amountCents: number }
+  | { type: "WITHDRAW"; playerId: string; amountCents: number };
 
 export const HISTORY_LEN = 60;
+
+// Interes de la caja de ahorro por tick (compuesto). Pequenyo pero visible.
+export const SAVINGS_RATE = 0.0006;

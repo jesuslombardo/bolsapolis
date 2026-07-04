@@ -20,7 +20,39 @@ const TRADE_SIZE = 5;
 export interface HudApi {
   openShop(kind: AssetKind): void;
   setNearShop(shop: { kind: AssetKind; name: string } | null): void;
+  toast(msg: string, kind?: "info" | "good" | "bad"): void;
 }
+
+// --- Sonidos generados por WebAudio (sin assets) ---
+let audio: AudioContext | null = null;
+function beep(freqs: number[], dur = 0.09, type: OscillatorType = "square", gain = 0.05) {
+  try {
+    audio ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const ctx = audio;
+    if (ctx.state === "suspended") ctx.resume();
+    freqs.forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = f;
+      const t0 = ctx.currentTime + i * dur;
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur);
+    });
+  } catch {
+    /* audio no disponible */
+  }
+}
+const sfx = {
+  buy: () => beep([440, 660], 0.08, "square"),
+  sell: () => beep([550, 330], 0.08, "square"),
+  coin: () => beep([880, 1170], 0.06, "triangle"),
+  levelup: () => beep([523, 659, 784, 1047], 0.1, "square", 0.06),
+  deny: () => beep([180, 120], 0.12, "sawtooth", 0.04),
+};
 
 export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): HudApi {
   // --- Barra de estado (arriba izquierda) ---
@@ -67,9 +99,47 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
   const invWin = makeWindow(root, "🎒 Inventario");
   const shopWin = makeWindow(root, "");
 
+  // Contenedor de avisos (toasts).
+  const toastHost = el(root, "div", {
+    position: "fixed",
+    top: "62px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    alignItems: "center",
+    zIndex: "50",
+    pointerEvents: "none",
+  });
+  function toast(msg: string, kind: "info" | "good" | "bad" = "info") {
+    const bg = kind === "good" ? "#2f8f4e" : kind === "bad" ? "#a23b4a" : "#26325c";
+    const t = el(toastHost, "div", {
+      padding: "8px 16px",
+      background: bg,
+      color: "#fff",
+      borderRadius: "999px",
+      font: "600 13px system-ui, sans-serif",
+      boxShadow: "0 4px 14px rgba(0,0,0,.4)",
+      opacity: "0",
+      transition: "opacity .18s, transform .18s",
+      transform: "translateY(-6px)",
+    });
+    t.textContent = msg;
+    requestAnimationFrame(() => {
+      t.style.opacity = "1";
+      t.style.transform = "translateY(0)";
+    });
+    setTimeout(() => {
+      t.style.opacity = "0";
+      setTimeout(() => t.remove(), 220);
+    }, 1700);
+  }
+
   let invOpen = false;
   let shopKind: AssetKind | null = null;
   let nearShop: { kind: AssetKind; name: string } | null = null;
+  let qty: number | "max" = TRADE_SIZE; // cantidad por operacion en el comercio
 
   function refreshInv(open: boolean) {
     invOpen = open;
@@ -104,8 +174,50 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     }
   });
 
-  function order(id: string, type: "BUY" | "SELL", shares = TRADE_SIZE) {
+  function order(id: string, type: "BUY" | "SELL") {
+    const state = runtime.getState();
+    const price = state.stocks[id].priceCents;
+    const owned = state.players[playerId].holdings[id]?.shares ?? 0;
+    let shares: number;
+    if (type === "BUY") {
+      shares = qty === "max" ? Math.floor(state.players[playerId].cashCents / price) : qty;
+    } else {
+      shares = qty === "max" ? owned : Math.min(qty, owned);
+    }
+    if (shares <= 0) {
+      sfx.deny();
+      toast(type === "BUY" ? "Sin oro suficiente" : "No tienes para vender", "bad");
+      return;
+    }
+    const before = state.players[playerId].cashCents;
     runtime.send({ type, playerId, stockId: id, shares });
+    const after = runtime.getState().players[playerId].cashCents;
+    if (after === before) {
+      sfx.deny();
+      toast("Sin oro suficiente", "bad");
+      return;
+    }
+    if (type === "BUY") {
+      sfx.buy();
+      toast(`Compraste ${shares} ${id}`, "good");
+    } else {
+      sfx.sell();
+      toast(`Vendiste ${shares} ${id}`, "good");
+    }
+  }
+
+  // Deposito / retiro en la caja de ahorro del Banco.
+  function bank(type: "DEPOSIT" | "WITHDRAW", amountCents: number | "max") {
+    const state = runtime.getState();
+    const p = state.players[playerId];
+    const amount = amountCents === "max" ? (type === "DEPOSIT" ? p.cashCents : p.savingsCents) : amountCents;
+    if (amount <= 0) {
+      sfx.deny();
+      return;
+    }
+    runtime.send({ type, playerId, amountCents: amount });
+    sfx.coin();
+    toast(type === "DEPOSIT" ? `Depositaste ${money(amount)}` : `Retiraste ${money(amount)}`, "good");
   }
 
   // Tarjeta de un activo dentro de un comercio (con comprar/vender).
@@ -116,7 +228,8 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     const h = player.holdings[id];
     const shares = h?.shares ?? 0;
     const change = stock.history.length > 1 ? stock.priceCents / stock.history[stock.history.length - 2] - 1 : 0;
-    const canBuy = player.cashCents >= stock.priceCents * TRADE_SIZE;
+    const canBuy = player.cashCents >= stock.priceCents;
+    const qtyLabel = qty === "max" ? "" : ` ${qty}`;
     return `
       <div style="border:1px solid #26325c;border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#101a38">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -129,9 +242,40 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
           <span style="font-size:12px;color:#9fb0dd">Tienes ${shares}</span>
           <div style="display:flex;gap:6px">
-            <button data-buy="${id}" ${canBuy ? "" : "disabled"} style="cursor:pointer;border:0;border-radius:6px;padding:7px 14px;background:${canBuy ? "#2f6bff" : "#33406b"};color:#fff;font-weight:700">Comprar ${TRADE_SIZE}</button>
-            <button data-sell="${id}" ${shares > 0 ? "" : "disabled"} style="cursor:pointer;border:0;border-radius:6px;padding:7px 14px;background:${shares > 0 ? "#26325c" : "#1b2440"};color:#dfe6ff;font-weight:700">Vender ${TRADE_SIZE}</button>
+            <button data-buy="${id}" ${canBuy ? "" : "disabled"} style="cursor:pointer;border:0;border-radius:6px;padding:7px 14px;background:${canBuy ? "#2f6bff" : "#33406b"};color:#fff;font-weight:700">Comprar${qtyLabel}</button>
+            <button data-sell="${id}" ${shares > 0 ? "" : "disabled"} style="cursor:pointer;border:0;border-radius:6px;padding:7px 14px;background:${shares > 0 ? "#26325c" : "#1b2440"};color:#dfe6ff;font-weight:700">Vender${qtyLabel}</button>
           </div>
+        </div>
+      </div>`;
+  }
+
+  // Selector de cantidad (x1 / x5 / x25 / Máx).
+  function qtySelector(): string {
+    const opts: Array<[string, number | "max"]> = [["x1", 1], ["x5", 5], ["x25", 25], ["Máx", "max"]];
+    return `
+      <div style="display:flex;gap:6px;margin-bottom:12px">
+        <span style="font-size:12px;color:#9fb0dd;align-self:center;margin-right:2px">Cantidad:</span>
+        ${opts
+          .map(
+            ([lbl, v]) =>
+              `<button data-qty="${v}" style="cursor:pointer;border:0;border-radius:6px;padding:6px 12px;font-weight:700;background:${qty === v ? "#2f6bff" : "#26325c"};color:#fff">${lbl}</button>`,
+          )
+          .join("")}
+      </div>`;
+  }
+
+  // Panel de la caja de ahorro (solo en el Banco).
+  function savingsPanel(state: GameState): string {
+    const p = state.players[playerId];
+    return `
+      <div style="border:1px solid #3a5a3f;border-radius:10px;padding:12px;margin-bottom:14px;background:#0f2417">
+        <div style="font-weight:700;margin-bottom:4px">🏦 Caja de Ahorro</div>
+        <div style="font-size:12px;color:#9fb0dd;margin-bottom:2px">Guardado: <b style="color:#7ee0a1">${money(p.savingsCents)}</b></div>
+        <div style="font-size:11px;color:#6b8f76;margin-bottom:10px">Gana interes solo, cada segundo.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button data-dep="100000" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;font-weight:700;background:#2f8f4e;color:#fff">Depositar 1000</button>
+          <button data-dep="max" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;font-weight:700;background:#2f8f4e;color:#fff">Depositar todo</button>
+          <button data-wit="max" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;font-weight:700;background:#26325c;color:#fff">Retirar todo</button>
         </div>
       </div>`;
   }
@@ -151,7 +295,7 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
           <div><b>${def.id}</b> <span style="color:#8092c0;font-size:12px">${def.kind === "stock" ? "Accion" : "Bono"}</span></div>
           <div style="font-size:12px;color:#9fb0dd">${h.shares} u · vale ${money(value)} · <span style="color:${pl >= 0 ? "#5ee08a" : "#ff6b81"}">${pl >= 0 ? "+" : ""}${money(pl)}</span></div>
         </div>
-        <button data-sell="${id}" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;background:#26325c;color:#dfe6ff;font-weight:700">Vender ${TRADE_SIZE}</button>
+        <button data-sell="${id}" style="cursor:pointer;border:0;border-radius:6px;padding:7px 12px;background:#26325c;color:#dfe6ff;font-weight:700">Vender${qty === "max" ? "" : ` ${qty}`}</button>
       </div>`;
   }
 
@@ -162,13 +306,34 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     container.querySelectorAll<HTMLButtonElement>("[data-sell]").forEach((b) => {
       b.onclick = () => order(b.dataset.sell!, "SELL");
     });
+    container.querySelectorAll<HTMLButtonElement>("[data-qty]").forEach((b) => {
+      b.onclick = () => {
+        const v = b.dataset.qty!;
+        qty = v === "max" ? "max" : Number(v);
+        render(runtime.getState());
+      };
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-dep]").forEach((b) => {
+      b.onclick = () => bank("DEPOSIT", b.dataset.dep === "max" ? "max" : Number(b.dataset.dep));
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-wit]").forEach((b) => {
+      b.onclick = () => bank("WITHDRAW", b.dataset.wit === "max" ? "max" : Number(b.dataset.wit));
+    });
   }
 
+  let lastTier = "";
   function render(state: GameState) {
     const player = state.players[playerId];
     const net = netWorthCents(state, playerId);
     const prosperity = prosperityOf(state, playerId);
     const tier = tierNameForProsperity(prosperity);
+
+    // Subida de nivel de la ciudad: aviso + sonido.
+    if (lastTier && tier !== lastTier) {
+      sfx.levelup();
+      toast(`¡Tu ciudad crecio a ${tier}!`, "good");
+    }
+    lastTier = tier;
 
     statusBar.innerHTML = `
       <span style="display:flex;gap:6px;align-items:center"><span style="font-size:17px">💰</span><b style="color:#ffe08a;font-size:16px">${money(player.cashCents)}</b></span>
@@ -181,7 +346,8 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       const ids = Object.keys(player.holdings).filter((id) => player.holdings[id].shares > 0);
       const invested = holdingsValueCents(state, playerId);
       invWin.body.innerHTML =
-        `<div style="font-size:12px;color:#9fb0dd;margin-bottom:12px">Valor invertido: <b style="color:#eaf0ff">${money(invested)}</b> · Efectivo: <b style="color:#ffe08a">${money(player.cashCents)}</b></div>` +
+        `<div style="font-size:12px;color:#9fb0dd;margin-bottom:10px">Valor invertido: <b style="color:#eaf0ff">${money(invested)}</b> · Ahorro: <b style="color:#7ee0a1">${money(player.savingsCents)}</b> · Efectivo: <b style="color:#ffe08a">${money(player.cashCents)}</b></div>` +
+        (ids.length ? qtySelector() : "") +
         (ids.length
           ? ids.map((id) => invItem(state, id)).join("")
           : `<div style="color:#8092c0;padding:20px 4px">No tienes activos. Ve a la <b>Bolsa</b> o al <b>Banco</b> y compra algo.</div>`);
@@ -192,6 +358,8 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
       const ids = defsForKind(shopKind).map((d) => d.id);
       shopWin.body.innerHTML =
         `<div style="font-size:13px;color:#ffe08a;margin-bottom:12px">💰 Tu oro: <b>${money(player.cashCents)}</b></div>` +
+        (shopKind === "bond" ? savingsPanel(state) : "") +
+        qtySelector() +
         ids.map((id) => shopCard(state, id)).join("");
       wire(shopWin.body);
     }
@@ -209,6 +377,7 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
         enterBtn.style.display = "none";
       }
     },
+    toast: (msg, kind) => toast(msg, kind),
   };
 
   if (isTouchDevice()) mountJoystick(root);

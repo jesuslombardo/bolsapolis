@@ -56,6 +56,37 @@ describe("motor de simulacion", () => {
   });
 });
 
+describe("caja de ahorro", () => {
+  it("depositar mueve efectivo a ahorro y no cambia el patrimonio", () => {
+    const s0 = createInitialState(7);
+    const net = netWorthCents(s0, "p1");
+    const s1 = applyCommand(s0, { type: "DEPOSIT", playerId: "p1", amountCents: 100_000 });
+    expect(s1.players.p1.savingsCents).toBe(100_000);
+    expect(s1.players.p1.cashCents).toBe(s0.players.p1.cashCents - 100_000);
+    expect(netWorthCents(s1, "p1")).toBe(net);
+  });
+
+  it("no permite depositar mas de lo que tienes en efectivo", () => {
+    const s0 = createInitialState(7);
+    const s1 = applyCommand(s0, { type: "DEPOSIT", playerId: "p1", amountCents: 99_999_999 });
+    expect(s1.players.p1.savingsCents).toBe(s0.players.p1.cashCents);
+    expect(s1.players.p1.cashCents).toBe(0);
+  });
+
+  it("el ahorro genera interes con el tiempo", () => {
+    let s = applyCommand(createInitialState(7), { type: "DEPOSIT", playerId: "p1", amountCents: 1_000_000 });
+    const start = s.players.p1.savingsCents;
+    for (let i = 0; i < 50; i++) s = tick(s);
+    expect(s.players.p1.savingsCents).toBeGreaterThan(start);
+  });
+
+  it("retirar devuelve el ahorro al efectivo", () => {
+    let s = applyCommand(createInitialState(7), { type: "DEPOSIT", playerId: "p1", amountCents: 200_000 });
+    s = applyCommand(s, { type: "WITHDRAW", playerId: "p1", amountCents: 50_000 });
+    expect(s.players.p1.savingsCents).toBe(150_000);
+  });
+});
+
 describe("ciudad", () => {
   it("la prosperidad crece con el patrimonio", () => {
     const s0 = createInitialState(7);

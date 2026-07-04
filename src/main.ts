@@ -40,5 +40,5 @@ runtime.start();
 // Gancho de depuracion solo en desarrollo (util para probar niveles de ciudad
 // sin tener que operar durante minutos). No se incluye en el build de produccion.
 if (import.meta.env.DEV) {
-  (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game };
+  (window as unknown as { __bolsapolis: unknown }).__bolsapolis = { runtime, game, hud };
 }

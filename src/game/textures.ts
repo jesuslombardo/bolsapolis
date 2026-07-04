@@ -315,4 +315,56 @@ export function buildTextures(scene: Phaser.Scene) {
     "..pp.p..",
     "..pp.p..",
   ], P);
+
+  // --- NPCs de los comercios ---
+  // Mercader (Bolsa): gorro y delantal verde.
+  const NPC1: Palette = {
+    e: 0xf0c39b,
+    h: 0x7a3b12, // gorro/pelo
+    u: 0x3f9d54, // delantal verde
+    U: 0x2f7a41,
+    p: 0x3a2a18,
+    k: 0x1a1206,
+    ".": null,
+  };
+  makePixel(scene, "npc_merchant", [
+    ".hhhhhh.",
+    "hhhhhhhh",
+    ".heeeeh.",
+    ".eeeeee.",
+    ".ekeeke.",
+    "..eeee..",
+    ".uUuuUu.",
+    "uUuuuuUu",
+    "uUuuuuUu",
+    ".uuuuuu.",
+    ".pp..pp.",
+    ".pp..pp.",
+  ], NPC1);
+
+  // Banquero (Banco): traje azul oscuro y sombrero.
+  const NPC2: Palette = {
+    e: 0xf0c39b,
+    h: 0x1a1a22, // sombrero
+    u: 0x2a3550, // traje
+    U: 0x1e2740,
+    g: 0xe8c34a, // corbata dorada
+    p: 0x14161f,
+    k: 0x0e0e14,
+    ".": null,
+  };
+  makePixel(scene, "npc_banker", [
+    "hhhhhhhh",
+    "hhhhhhhh",
+    ".heeeeh.",
+    ".eeeeee.",
+    ".ekeeke.",
+    "..eeee..",
+    ".uUguUu.",
+    "uUugguUu",
+    "uUugguUu",
+    ".uuguuu.",
+    ".pp..pp.",
+    ".pp..pp.",
+  ], NPC2);
 }
