@@ -5,6 +5,7 @@ import type { Runtime } from "./runtime.ts";
 import type { HudApi } from "../ui/hud.ts";
 import { buildTextures } from "./textures.ts";
 import { touchMove } from "./input.ts";
+import { sfx } from "./audio.ts";
 
 interface Shop {
   kind: AssetKind;
@@ -46,8 +47,10 @@ export class WorldScene extends Phaser.Scene {
   private interactKey!: Phaser.Input.Keyboard.Key;
   private nearShop: Shop | null = null;
   private staticSolids: Array<{ x: number; y: number; r: number }> = [];
+  private treeSolids: Array<{ x: number; y: number; r: number }> = [];
   private solids: Array<{ x: number; y: number; r: number }> = [];
   private lastTier = "";
+  private stepTimer = 0;
 
   constructor() {
     super("world");
@@ -104,10 +107,11 @@ export class WorldScene extends Phaser.Scene {
       this.tweens.add({ targets: npc, y: npc.y - 1.5, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     }
 
-    // Solidos fijos (colisiones): comercios y fuente.
+    // Solidos fijos (colisiones): comercios, fuente y arboles.
     this.staticSolids = [
       ...this.shops.map((s) => ({ x: s.x, y: s.y - 8, r: 13 })),
       { x: cx, y: cy - 4, r: 8 },
+      ...this.treeSolids,
     ];
 
     // Heroe.
@@ -150,11 +154,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // Arboles decorativos por los bordes y claros del mapa (patron determinista).
+  // Cada arbol es un solido: su tronco bloquea el paso.
   private scatterNature() {
     let s = 12345;
     const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
     const midC = COLS / 2;
     const midR = ROWS / 2;
+    this.treeSolids = [];
     for (let i = 0; i < 140; i++) {
       const c = Math.floor(rnd() * COLS);
       const r = Math.floor(rnd() * ROWS);
@@ -163,6 +169,8 @@ export class WorldScene extends Phaser.Scene {
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE;
       this.add.image(x, y, "tree").setOrigin(0.5, 1).setDepth(y);
+      // Colision solo en el tronco (parte baja del arbol).
+      this.treeSolids.push({ x, y: y - 4, r: 5 });
     }
   }
 
@@ -256,7 +264,8 @@ export class WorldScene extends Phaser.Scene {
       const len = Math.hypot(vx, vy);
       const stepX = (vx / len) * SPEED * dt;
       const stepY = (vy / len) * SPEED * dt;
-      // Colision por eje: permite deslizarse a lo largo de las paredes.
+      const fromX = this.hero.x;
+      const fromY = this.hero.y;
       // Colision por eje basada en penetracion: se permite el movimiento
       // mientras no aumente el solape con los edificios (asi bloquea la entrada
       // pero siempre deja salir si un edificio apareciera encima).
@@ -278,6 +287,20 @@ export class WorldScene extends Phaser.Scene {
       this.hero.setFlipX(this.facing === "side" && this.flip);
       // Bamboleo al andar.
       this.hero.y += Math.sin(_t / 90) * 0.15;
+
+      // Pasitos (tiki-tiki): solo si de verdad se desplazo (no contra una pared).
+      const moved = Math.hypot(this.hero.x - fromX, this.hero.y - fromY);
+      if (moved > 0.2) {
+        this.stepTimer += delta;
+        if (this.stepTimer >= 260) {
+          this.stepTimer = 0;
+          sfx.step();
+        }
+      } else {
+        this.stepTimer = 260; // proximo movimiento suena enseguida
+      }
+    } else {
+      this.stepTimer = 260;
     }
 
     // Comercio mas cercano dentro de rango.

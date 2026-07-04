@@ -4,6 +4,7 @@ import { netWorthCents, holdingsValueCents } from "../sim/engine.ts";
 import { prosperityOf, tierNameForProsperity } from "../sim/city.ts";
 import { ASSET_DEFS, defsForKind } from "../sim/market.ts";
 import { touchMove, isTouchDevice } from "../game/input.ts";
+import { sfx } from "../game/audio.ts";
 import { money, pct } from "./format.ts";
 
 // Interfaz RPG superpuesta sobre el mundo:
@@ -22,37 +23,6 @@ export interface HudApi {
   setNearShop(shop: { kind: AssetKind; name: string } | null): void;
   toast(msg: string, kind?: "info" | "good" | "bad"): void;
 }
-
-// --- Sonidos generados por WebAudio (sin assets) ---
-let audio: AudioContext | null = null;
-function beep(freqs: number[], dur = 0.09, type: OscillatorType = "square", gain = 0.05) {
-  try {
-    audio ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    const ctx = audio;
-    if (ctx.state === "suspended") ctx.resume();
-    freqs.forEach((f, i) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = f;
-      const t0 = ctx.currentTime + i * dur;
-      g.gain.setValueAtTime(gain, t0);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(t0);
-      osc.stop(t0 + dur);
-    });
-  } catch {
-    /* audio no disponible */
-  }
-}
-const sfx = {
-  buy: () => beep([440, 660], 0.08, "square"),
-  sell: () => beep([550, 330], 0.08, "square"),
-  coin: () => beep([880, 1170], 0.06, "triangle"),
-  levelup: () => beep([523, 659, 784, 1047], 0.1, "square", 0.06),
-  deny: () => beep([180, 120], 0.12, "sawtooth", 0.04),
-};
 
 export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): HudApi {
   // --- Barra de estado (arriba izquierda) ---
@@ -161,7 +131,10 @@ export function mountHud(root: HTMLElement, runtime: Runtime, playerId = "p1"): 
     if (kind) {
       invOpen = false;
       invWin.root.style.transform = "translateX(110%)";
-      if (greet) toast(kind === "stock" ? "Mercader: —¿Qué hacés, campeón? Pasá a invertir." : "Banquero: —Bienvenido. Su plata, segura acá.", "info");
+      if (greet) {
+        sfx.talk();
+        toast(kind === "stock" ? "Mercader: —¿Qué hacés, campeón? Pasá a invertir." : "Banquero: —Bienvenido. Su plata, segura acá.", "info");
+      }
     }
     render(runtime.getState());
   }
