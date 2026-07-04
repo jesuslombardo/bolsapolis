@@ -45,6 +45,8 @@ export interface PlayerState {
   cashCents: number;
   /** Oro en la caja de ahorro del Banco (genera interes cada tick). */
   savingsCents: number;
+  /** Experiencia (sabiduria financiera): se gana cazando y viviendo eventos. */
+  xp: number;
   holdings: Record<string, Holding>;
 }
 
@@ -71,7 +73,12 @@ export type Command =
   | { type: "BUY"; playerId: string; stockId: string; shares: number }
   | { type: "SELL"; playerId: string; stockId: string; shares: number }
   | { type: "DEPOSIT"; playerId: string; amountCents: number }
-  | { type: "WITHDRAW"; playerId: string; amountCents: number };
+  | { type: "WITHDRAW"; playerId: string; amountCents: number }
+  /** Botin de caza: monedas del piso (LOOT) y experiencia (XP). */
+  | { type: "LOOT"; playerId: string; amountCents: number }
+  | { type: "XP"; playerId: string; amount: number }
+  /** La Inflacion te quemo efectivo al tocarte. */
+  | { type: "BURN"; playerId: string; amountCents: number };
 
 export const HISTORY_LEN = 60;
 

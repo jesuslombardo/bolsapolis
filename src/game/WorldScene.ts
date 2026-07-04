@@ -5,9 +5,10 @@ import { levelOf } from "../sim/progress.ts";
 import type { Runtime } from "./runtime.ts";
 import type { HudApi } from "../ui/hud.ts";
 import { buildTextures } from "./textures.ts";
-import { touchMove } from "./input.ts";
+import { touchMove, touchAttack } from "./input.ts";
 import { sfx } from "./audio.ts";
 import { islandById, ISLANDS, OPP, type Dir, type IslandDef } from "./islands.ts";
+import { CreatureManager } from "./creatures.ts";
 
 interface Shop {
   kind: AssetKind;
@@ -83,6 +84,17 @@ export class WorldScene extends Phaser.Scene {
   private exits: Exit[] = [];
   private traveling = false;
   private lastGateToast = 0;
+
+  // Combate y caza.
+  private creatures!: CreatureManager;
+  private attackKey!: Phaser.Input.Keyboard.Key;
+  private attackCooldown = 0;
+  private animo = 100;
+  private lastHurtAt = -9999;
+  private lastBurnToast = 0;
+  private rentTimer = 0;
+  private buildingSpots: Array<{ x: number; y: number }> = [];
+  private townCenter = { x: 0, y: 0 };
 
   constructor() {
     super("world");
@@ -228,9 +240,93 @@ export class WorldScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.attackKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    // Criaturas: los peligros financieros andan sueltos fuera del pueblo.
+    this.townCenter = { x: cx, y: cy };
+    this.animo = 100;
+    this.hud.setAnimo(1);
+    this.creatures = new CreatureManager(this, 777 + this.island.id.length * 131, {
+      isWater: (x, y) => this.isWater(x, y),
+      isSafeZone: (x, y) => this.isSafeZone(x, y),
+      onHeroHurt: (dmg) => this.heroHurt(dmg),
+      onBurn: (pct) => this.heroBurn(pct),
+    });
+    this.placeSpawns();
 
     // Aviso de donde estas.
     this.time.delayedCall(200, () => this.hud.toast(`📍 ${this.island.name}`, "info"));
+  }
+
+  // Zona segura: dentro de la muralla (Isla Central) o cerca de la plaza.
+  private isSafeZone(x: number, y: number): boolean {
+    const dx = Math.abs(x - this.townCenter.x) / TILE;
+    const dy = Math.abs(y - this.townCenter.y) / TILE;
+    if (this.island.klass === "central") return dx < WALL_HALF - 0.3 && dy < WALL_HALF - 0.3;
+    return Math.max(dx, dy) < 5;
+  }
+
+  // Puntos de spawn de criaturas: en tierra, fuera del pueblo y de los caminos.
+  private placeSpawns() {
+    let s = 4242 + this.island.id.length * 97;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const midC = COLS / 2;
+    const midR = ROWS / 2;
+    const nDeuditas = 8;
+    const nInflacion = this.island.klass === "central" ? 2 : 3;
+    let placedD = 0;
+    let placedI = 0;
+    let guard = 0;
+    while ((placedD < nDeuditas || placedI < nInflacion) && guard++ < 600) {
+      const c = LMINC + 2 + Math.floor(rnd() * (LMAXC - LMINC - 4));
+      const r = LMINR + 2 + Math.floor(rnd() * (LMAXR - LMINR - 4));
+      if (!this.land[r]?.[c]) continue;
+      if (Math.abs(c - midC) <= 2 || Math.abs(r - midR) <= 2) continue; // caminos
+      const x = c * TILE + TILE / 2;
+      const y = r * TILE + TILE / 2;
+      if (this.isSafeZone(x, y)) continue;
+      if (Math.hypot(c - midC, r - midR) < WALL_HALF + 2) continue; // pegado a la muralla no
+      if (placedD < nDeuditas) {
+        this.creatures.addSpawn("deudita", x, y);
+        placedD++;
+      } else {
+        this.creatures.addSpawn("inflacion", x, y);
+        placedI++;
+      }
+    }
+  }
+
+  private heroHurt(dmg: number) {
+    this.animo = Math.max(0, this.animo - dmg);
+    this.lastHurtAt = this.time.now;
+    this.hud.setAnimo(this.animo / 100);
+    sfx.hurt();
+    this.cameras.main.shake(90, 0.004);
+    this.hero.setTintFill(0xff6b6b);
+    this.time.delayedCall(90, () => this.hero.clearTint());
+    if (this.animo <= 0) this.faint();
+  }
+
+  private heroBurn(pct: number) {
+    const cash = this.runtime.getState().players[this.playerId]?.cashCents ?? 0;
+    const burn = Math.floor(cash * pct);
+    if (burn <= 0) return;
+    this.runtime.send({ type: "BURN", playerId: this.playerId, amountCents: burn });
+    sfx.burn();
+    if (this.time.now - this.lastBurnToast > 2500) {
+      this.lastBurnToast = this.time.now;
+      this.hud.toast("🔥 ¡La Inflación te está quemando el efectivo! Alejate o invertilo", "bad");
+    }
+  }
+
+  // Desmayo: despiertas en la fuente con medio animo. La leccion, gratis.
+  private faint() {
+    sfx.faint();
+    this.cameras.main.flash(300, 180, 40, 40);
+    this.hero.setPosition(this.townCenter.x, this.townCenter.y + 44);
+    this.animo = 55;
+    this.hud.setAnimo(this.animo / 100);
+    this.hud.toast("😵 Te desmayaste... Despertás en la fuente. El mercado sigue.", "bad");
   }
 
   // --- Terreno: agua alrededor, tierra en el medio, puentes en las salidas ---
@@ -406,10 +502,12 @@ export class WorldScene extends Phaser.Scene {
     }
     plots.sort((a, b) => a.r - b.r);
     const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
+    this.buildingSpots = [];
     plots.slice(0, this.island.fixed).forEach((plot, i) => {
       const key = set[i % set.length];
       this.add.image(plot.x, plot.y, key).setOrigin(0.5, 1).setDepth(plot.y);
       buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
+      this.buildingSpots.push({ x: plot.x, y: plot.y });
       this.addLight(this.buildingLights, plot.x, plot.y - 10, 1);
     });
     this.solids = [...this.staticSolids, ...buildingSolids];
@@ -440,11 +538,13 @@ export class WorldScene extends Phaser.Scene {
     this.buildings.removeAll(true);
     const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
     this.buildingLights.removeAll(true);
+    this.buildingSpots = [];
     for (let i = 0; i < count; i++) {
       const plot = this.plots[i];
       const img = this.add.image(plot.x, plot.y, buildingKey(p, i)).setOrigin(0.5, 1).setDepth(plot.y);
       this.buildings.add(img);
       buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
+      this.buildingSpots.push({ x: plot.x, y: plot.y });
       this.addLight(this.buildingLights, plot.x, plot.y - 10, 1);
       if (grew && i >= from) {
         img.setScale(0.2).setAlpha(0.4);
@@ -545,6 +645,50 @@ export class WorldScene extends Phaser.Scene {
       this.hud.setNearShop(near ? { kind: near.kind, name: near.name } : null);
     }
     if (this.nearShop && Phaser.Input.Keyboard.JustDown(this.interactKey)) this.hud.openShop(this.nearShop.kind);
+
+    // --- Combate y caza ---
+    this.attackCooldown -= delta;
+    const wantAttack = Phaser.Input.Keyboard.JustDown(this.attackKey) || touchAttack.pressed;
+    touchAttack.pressed = false;
+    if (wantAttack && this.attackCooldown <= 0 && this.creatures) {
+      this.attackCooldown = 340;
+      // Tajo visual en la direccion de la mirada.
+      const off = this.facing === "side" ? { x: this.flip ? -10 : 10, y: -4 } : this.facing === "up" ? { x: 0, y: -12 } : { x: 0, y: 6 };
+      const fx = this.add
+        .image(this.hero.x + off.x, this.hero.y + off.y, "slash")
+        .setDepth(this.hero.y + 1)
+        .setFlipX(this.flip)
+        .setAlpha(0.95);
+      this.tweens.add({ targets: fx, alpha: 0, scale: 1.5, duration: 130, onComplete: () => fx.destroy() });
+      // Danyo: crece con tu nivel (la sabiduria pega mas fuerte).
+      const lvl = levelOf(this.runtime.getState(), this.playerId);
+      this.creatures.heroAttack(this.hero.x + off.x, this.hero.y + off.y, 16 + lvl * 6);
+    }
+
+    if (this.creatures) {
+      const loot = this.creatures.update(delta, this.hero.x, this.hero.y);
+      if (loot.lootCents > 0) this.runtime.send({ type: "LOOT", playerId: this.playerId, amountCents: loot.lootCents });
+      if (loot.lootXp > 0) {
+        this.runtime.send({ type: "XP", playerId: this.playerId, amount: loot.lootXp });
+        this.hud.toast(`✨ +${loot.lootXp} XP`, "info");
+      }
+    }
+
+    // Regeneracion de animo (si hace 4 s que no te pegan).
+    if (this.animo < 100 && this.time.now - this.lastHurtAt > 4000) {
+      this.animo = Math.min(100, this.animo + 3 * dt);
+      this.hud.setAnimo(this.animo / 100);
+    }
+
+    // Renta fisica: tus edificios tiran monedas al piso cada tanto.
+    this.rentTimer -= delta;
+    if (this.rentTimer <= 0 && this.buildingSpots.length > 0 && this.creatures) {
+      this.rentTimer = 5200;
+      const p = prosperityOf(this.runtime.getState(), this.playerId);
+      const spot = this.buildingSpots[Math.floor(Math.random() * this.buildingSpots.length)];
+      const value = Math.round(20_000 + p * 180_000); // $200 a ~$2000 por moneda
+      this.creatures.dropCoin(spot.x + (Math.random() * 12 - 6), spot.y + 4, value);
+    }
 
     // Salidas: viajar a otra isla si el nivel alcanza.
     if (!this.traveling) {

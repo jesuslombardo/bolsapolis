@@ -4,7 +4,7 @@ import { netWorthCents, holdingsValueCents } from "../sim/engine.ts";
 import { prosperityOf, tierNameForProsperity } from "../sim/city.ts";
 import { levelOf } from "../sim/progress.ts";
 import { ASSET_DEFS, defsForKind } from "../sim/market.ts";
-import { touchMove, isTouchDevice } from "../game/input.ts";
+import { touchMove, touchAttack, isTouchDevice } from "../game/input.ts";
 import { sfx } from "../game/audio.ts";
 import { clearSave } from "../game/save.ts";
 import { logout } from "../game/account.ts";
@@ -29,6 +29,8 @@ export interface HudApi {
   openShop(kind: AssetKind): void;
   setNearShop(shop: { kind: AssetKind; name: string } | null): void;
   toast(msg: string, kind?: "info" | "good" | "bad"): void;
+  /** Barra de animo (HP mental) del heroe: fraccion [0..1]. */
+  setAnimo(frac: number): void;
 }
 
 export function mountHud(
@@ -77,7 +79,7 @@ export function mountHud(
   // --- Barra de noticias de mercado (bajo la barra de estado) ---
   const newsBar = el(root, "div", {
     position: "fixed",
-    top: "54px",
+    top: "76px",
     left: "12px",
     maxWidth: "70vw",
     display: "none",
@@ -108,6 +110,56 @@ export function mountHud(
   const invWin = makeWindow(root, "🎒 Inventario");
   const shopWin = makeWindow(root, "");
   const missionsWin = makeWindow(root, "🎯 Misiones");
+
+  // --- Barra de animo (HP): debajo de la barra de estado ---
+  const animoWrap = el(root, "div", {
+    position: "fixed",
+    top: "58px",
+    left: "12px",
+    width: "150px",
+    height: "10px",
+    background: "rgba(10,16,32,.72)",
+    border: "1px solid #2a3a63",
+    borderRadius: "999px",
+    overflow: "hidden",
+    zIndex: "20",
+    pointerEvents: "none",
+  });
+  const animoBar = el(animoWrap, "div", {
+    width: "100%",
+    height: "100%",
+    background: "linear-gradient(90deg,#ff8a5a,#ffd23a)",
+    borderRadius: "999px",
+    transition: "width .18s",
+  });
+  function setAnimo(frac: number) {
+    animoBar.style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + "%";
+    animoBar.style.background = frac > 0.4 ? "linear-gradient(90deg,#ff8a5a,#ffd23a)" : "linear-gradient(90deg,#d23b3b,#ff6b6b)";
+  }
+
+  // --- Boton de ataque tactil (movil): abajo a la derecha ---
+  if (isTouchDevice()) {
+    const atk = el(root, "button", {
+      position: "fixed",
+      right: "26px",
+      bottom: "34px",
+      width: "84px",
+      height: "84px",
+      borderRadius: "50%",
+      border: "2px solid rgba(255,150,150,.6)",
+      background: "rgba(180,40,50,.75)",
+      color: "#fff",
+      fontSize: "34px",
+      zIndex: "34",
+      touchAction: "none",
+      userSelect: "none",
+    }) as HTMLButtonElement;
+    atk.textContent = "⚔️";
+    atk.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      touchAttack.pressed = true;
+    });
+  }
 
   // Contenedor de avisos (toasts).
   const toastHost = el(root, "div", {
@@ -551,7 +603,7 @@ export function mountHud(
     statusBar.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:1px">
         <div style="display:flex;gap:6px;align-items:center"><span style="font-size:17px">💰</span><b style="color:#ffe08a;font-size:17px">${money(player.cashCents)}</b></div>
-        <div style="font-size:11px;color:#9fb0dd">👤 ${profileName} · <span style="color:#8fb2ff">Nivel ${level}</span></div>
+        <div style="font-size:11px;color:#9fb0dd">👤 ${profileName} · <span style="color:#8fb2ff">Nivel ${level}</span> · <span style="color:#62d0ff">✨ ${player.xp ?? 0} XP</span></div>
       </div>`;
 
     if (invOpen) {
@@ -600,6 +652,7 @@ export function mountHud(
       }
     },
     toast: (msg, kind) => toast(msg, kind),
+    setAnimo,
   };
 
   if (isTouchDevice()) mountJoystick(root);

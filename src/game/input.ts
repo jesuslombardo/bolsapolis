@@ -3,6 +3,9 @@
 // al teclado. Componentes en [-1, 1].
 export const touchMove = { x: 0, y: 0 };
 
+// Boton de ataque tactil: el HUD lo aprieta, la escena lo consume (edge-trigger).
+export const touchAttack = { pressed: false };
+
 export function isTouchDevice(): boolean {
   return (
     typeof window !== "undefined" &&

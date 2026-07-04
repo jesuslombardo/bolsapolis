@@ -44,6 +44,7 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
     name: playerName,
     cashCents: STARTING_CASH_CENTS - spent,
     savingsCents: 0,
+    xp: 0,
     holdings,
   };
   return { tick: 0, seed, stocks, players: { [playerId]: player }, event: null };
@@ -100,6 +101,26 @@ export function tick(state: GameState): GameState {
 export function applyCommand(state: GameState, cmd: Command): GameState {
   const player = state.players[cmd.playerId];
   if (!player) return state;
+
+  // Botin de caza y experiencia.
+  if (cmd.type === "LOOT") {
+    const amount = Math.max(0, Math.floor(cmd.amountCents));
+    if (amount === 0) return state;
+    const nextPlayer: PlayerState = { ...player, cashCents: player.cashCents + amount };
+    return { ...state, players: { ...state.players, [cmd.playerId]: nextPlayer } };
+  }
+  if (cmd.type === "XP") {
+    const amount = Math.max(0, Math.floor(cmd.amount));
+    if (amount === 0) return state;
+    const nextPlayer: PlayerState = { ...player, xp: (player.xp ?? 0) + amount };
+    return { ...state, players: { ...state.players, [cmd.playerId]: nextPlayer } };
+  }
+  if (cmd.type === "BURN") {
+    const amount = Math.min(Math.max(0, Math.floor(cmd.amountCents)), player.cashCents);
+    if (amount === 0) return state;
+    const nextPlayer: PlayerState = { ...player, cashCents: player.cashCents - amount };
+    return { ...state, players: { ...state.players, [cmd.playerId]: nextPlayer } };
+  }
 
   // Caja de ahorro: mover oro entre efectivo y ahorro.
   if (cmd.type === "DEPOSIT" || cmd.type === "WITHDRAW") {

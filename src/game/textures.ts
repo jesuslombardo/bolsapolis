@@ -292,6 +292,61 @@ export function buildTextures(scene: Phaser.Scene, hairColor = 0x4a2f1c) {
     ".ssssssssss.",
   ], rancho);
 
+  // --- Criaturas y loot ---
+  // Deudita: rata de la deuda (bicho nivel 1).
+  const rat: Palette = { f: 0x8a7462, F: 0x6e5a4a, e: 0xd23b3b, t: 0xc9a0a0, k: 0x2a1a0e, ".": null };
+  makePixel(scene, "mob_deudita", [
+    "..ff....",
+    ".ffff.f.",
+    "ffffffff",
+    "fFeffFff",
+    "ffffffft",
+    ".fkfkf.t",
+    "........",
+  ], rat);
+
+  // La Inflacion: llama que quema el efectivo.
+  const flame: Palette = { r: 0xff5a2a, R: 0xd23b1c, y: 0xffd23a, Y: 0xffb020, k: 0x7a1a08, ".": null };
+  makePixel(scene, "mob_inflacion", [
+    "....r.....",
+    "...rRr..r.",
+    "..rRRRr.R.",
+    ".rRyYyRrR.",
+    ".RyYYYyRR.",
+    ".RyYkYyRr.",
+    ".RyYYYyR..",
+    "..RyYyR...",
+    "...RRR....",
+  ], flame);
+
+  // Moneda (loot fisico) y orbe de experiencia.
+  const coin: Palette = { g: 0xe8c34a, G: 0xb8952e, w: 0xfff3c4, ".": null };
+  makePixel(scene, "coin", [
+    ".ggg.",
+    "gwGgg",
+    "gGgGg",
+    "ggGgg",
+    ".ggg.",
+  ], coin);
+  const orb: Palette = { b: 0x62d0ff, B: 0x2f8fd0, w: 0xeaffff, ".": null };
+  makePixel(scene, "orb", [
+    ".bbb.",
+    "bwbBb",
+    "bbbBb",
+    "bBBBb",
+    ".bbb.",
+  ], orb);
+
+  // Tajo del ataque del heroe.
+  const slash: Palette = { w: 0xffffff, W: 0xcfe0ff, ".": null };
+  makePixel(scene, "slash", [
+    "...ww",
+    "..wW.",
+    ".wW..",
+    "wW...",
+    "w....",
+  ], slash);
+
   // Muralla de piedra (ladrillos con mortero).
   const wall: Palette = { s: 0x8a8f99, S: 0xa2a7b0, m: 0x4e535c, ".": null };
   makePixel(scene, "wall", [

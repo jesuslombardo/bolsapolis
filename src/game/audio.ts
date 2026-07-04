@@ -48,4 +48,11 @@ export const sfx = {
   deny: () => beep([180, 120], 0.12, "sawtooth", 0.04),
   talk: () => beep([330, 440], 0.06, "square", 0.04),
   step,
+  // Combate
+  hit: () => beep([220, 160], 0.05, "square", 0.05),
+  hurt: () => beep([140, 90], 0.09, "sawtooth", 0.05),
+  mobdie: () => beep([500, 380, 260], 0.06, "square", 0.05),
+  pickup: () => beep([990, 1320], 0.05, "triangle", 0.045),
+  burn: () => beep([90, 70, 55], 0.08, "sawtooth", 0.04),
+  faint: () => beep([300, 220, 150, 90], 0.12, "sine", 0.06),
 };

@@ -27,6 +27,13 @@ function startGame(profile: Profile) {
   // Carga la partida del perfil (o crea una nueva con $100.000).
   const saved = loadSave(profile.email);
   let initialState = saved?.state ?? createInitialState(SEED, "p1", profile.name);
+  // Migracion de partidas viejas: agrega el campo de experiencia si falta.
+  if (initialState.players.p1 && typeof initialState.players.p1.xp !== "number") {
+    initialState = {
+      ...initialState,
+      players: { ...initialState.players, p1: { ...initialState.players.p1, xp: 0 } },
+    };
+  }
   let offlineGain = 0;
 
   // Crecimiento offline del ahorro: rindio mientras no estabas (tope 7 dias).

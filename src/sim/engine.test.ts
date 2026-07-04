@@ -117,6 +117,29 @@ describe("ciudad", () => {
   });
 });
 
+describe("caza (loot, xp, quemadura)", () => {
+  it("LOOT suma efectivo", () => {
+    const s0 = createInitialState(7);
+    const s1 = applyCommand(s0, { type: "LOOT", playerId: "p1", amountCents: 50_000 });
+    expect(s1.players.p1.cashCents).toBe(s0.players.p1.cashCents + 50_000);
+  });
+
+  it("XP acumula experiencia", () => {
+    let s = createInitialState(7);
+    s = applyCommand(s, { type: "XP", playerId: "p1", amount: 10 });
+    s = applyCommand(s, { type: "XP", playerId: "p1", amount: 45 });
+    expect(s.players.p1.xp).toBe(55);
+  });
+
+  it("BURN quema efectivo pero nunca deja saldo negativo", () => {
+    const s0 = createInitialState(7);
+    const s1 = applyCommand(s0, { type: "BURN", playerId: "p1", amountCents: 100_000 });
+    expect(s1.players.p1.cashCents).toBe(s0.players.p1.cashCents - 100_000);
+    const s2 = applyCommand(s1, { type: "BURN", playerId: "p1", amountCents: 99_999_999_999 });
+    expect(s2.players.p1.cashCents).toBe(0);
+  });
+});
+
 describe("nivel", () => {
   it("empieza en nivel 1 y sube con el patrimonio", () => {
     const s0 = createInitialState(7);
