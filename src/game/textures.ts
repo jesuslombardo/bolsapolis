@@ -185,6 +185,68 @@ export function buildTextures(scene: Phaser.Scene) {
     "sssssssskkssssssssss",
   ], castle);
 
+  // --- Comercios (mas grandes y distintivos) ---
+  // Bolsa: puesto de mercado con toldo a rayas y cartel.
+  const bolsa: Palette = {
+    a: 0xd23b3b, // toldo rojo
+    A: 0xf0f0f0, // toldo blanco
+    w: 0x6a4a2a, // madera
+    W: 0x4e3620,
+    s: 0xbfc6cf, // piedra clara
+    g: 0xe8c34a, // cartel dorado
+    k: 0x2a1a0e,
+    ".": null,
+  };
+  makePixel(scene, "b_bolsa", [
+    "....gggggggg....",
+    "...gkgkgkgkgg...",
+    "..aAaAaAaAaAaA..",
+    ".aAaAaAaAaAaAaA.",
+    "aAaAaAaAaAaAaAaA",
+    "wWwwwwwwwwwwwwWw",
+    "w.ssssssssss..Ww",
+    "w.s.wwwwww.s..Ww",
+    "w.s.w....w.s..Ww",
+    "w.s.w....w.s..Ww",
+    "wWssssssssssssWw",
+    "wwwwwwwwwwwwwwww",
+  ], bolsa);
+
+  // Banco: edificio con columnas y moneda.
+  const banco: Palette = {
+    s: 0xcfd4da, // marmol
+    S: 0xa9afb8,
+    r: 0x3f5e8f, // techo azul
+    R: 0x2f4870,
+    g: 0xe8c34a, // moneda/oro
+    k: 0x2a2a2a,
+    ".": null,
+  };
+  makePixel(scene, "b_banco", [
+    ".rrrrrrrrrrrr.",
+    "rrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRR",
+    "s.g.ssssss.g.s",
+    "s.g.ssssss.g.s",
+    "sSsSsSsSsSsSsS",
+    "s.s.s.gg.s.s.s",
+    "s.s.s.gg.s.s.s",
+    "s.s.s.gg.s.s.s",
+    "sSsSsSsSsSsSsS",
+    "ssssssssssssss",
+  ], banco);
+
+  // Cartel indicador.
+  const sign: Palette = { w: 0x6a4a2a, W: 0x4e3620, g: 0xe8c34a, ".": null };
+  makePixel(scene, "sign", [
+    "gggggg",
+    "gggggg",
+    "gggggg",
+    "..WW..",
+    "..WW..",
+    "..WW..",
+  ], sign);
+
   // --- Fuente central del pueblo ---
   const well: Palette = { s: 0x8a909a, S: 0x6c727c, w: 0x3f80c4, p: 0x6a4a2a, ".": null };
   makePixel(scene, "well", [

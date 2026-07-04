@@ -1,6 +1,6 @@
 import type { Command, GameState, Holding, PlayerState, Stock } from "./types.ts";
 import { HISTORY_LEN } from "./types.ts";
-import { STOCK_DEFS } from "./market.ts";
+import { ASSET_DEFS } from "./market.ts";
 import { makeRng, gaussian } from "./rng.ts";
 
 // Motor de simulacion PURO y determinista.
@@ -15,10 +15,11 @@ const STARTING_CASH_CENTS = 1_000_000; // 10.000 unidades de moneda
 
 export function createInitialState(seed: number, playerId = "p1", playerName = "Tu"): GameState {
   const stocks: Record<string, Stock> = {};
-  for (const def of STOCK_DEFS) {
+  for (const def of ASSET_DEFS) {
     stocks[def.id] = {
       id: def.id,
       name: def.name,
+      kind: def.kind,
       priceCents: def.startPriceCents,
       history: [def.startPriceCents],
     };
@@ -29,7 +30,7 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
   const seededHoldings: Array<[string, number]> = [
     ["GRANO", 40],
     ["LADRI", 20],
-    ["VOLT", 10],
+    ["BONOR", 8],
   ];
   const holdings: Record<string, Holding> = {};
   let spent = 0;
@@ -61,7 +62,7 @@ function priceFor(seed: number, tick: number, stockIndex: number, prevCents: num
 export function tick(state: GameState): GameState {
   const nextTick = state.tick + 1;
   const stocks: Record<string, Stock> = {};
-  STOCK_DEFS.forEach((def, i) => {
+  ASSET_DEFS.forEach((def, i) => {
     const prev = state.stocks[def.id];
     const priceCents = priceFor(state.seed, nextTick, i, prev.priceCents, def.drift, def.volatility);
     const history = [...prev.history, priceCents];

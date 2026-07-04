@@ -33,9 +33,8 @@ const game = new Phaser.Game({
   scene: [WorldScene],
 });
 
-game.scene.start("world", { runtime, playerId: "p1" });
-
-mountHud(appEl, runtime, "p1");
+const hud = mountHud(appEl, runtime, "p1");
+game.scene.start("world", { runtime, hud, playerId: "p1" });
 runtime.start();
 
 // Gancho de depuracion solo en desarrollo (util para probar niveles de ciudad

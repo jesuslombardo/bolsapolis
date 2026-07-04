@@ -1,9 +1,18 @@
 import Phaser from "phaser";
-import type { GameState } from "../sim/types.ts";
+import type { AssetKind, GameState } from "../sim/types.ts";
 import { prosperityOf } from "../sim/city.ts";
 import type { Runtime } from "./runtime.ts";
+import type { HudApi } from "../ui/hud.ts";
 import { buildTextures } from "./textures.ts";
 import { touchMove } from "./input.ts";
+
+interface Shop {
+  kind: AssetKind;
+  name: string;
+  tex: string;
+  x: number;
+  y: number;
+}
 
 // Mundo cenital estilo Argentum Online: caminas con un personaje por un mapa
 // de tiles y tu pueblo crece con tu patrimonio (de aldea a metropoli).
@@ -32,12 +41,18 @@ export class WorldScene extends Phaser.Scene {
   private plots: Array<{ x: number; y: number; r: number }> = [];
   private lastCount = -1;
 
+  private hud!: HudApi;
+  private shops: Shop[] = [];
+  private interactKey!: Phaser.Input.Keyboard.Key;
+  private nearShop: Shop | null = null;
+
   constructor() {
     super("world");
   }
 
-  init(data: { runtime: Runtime; playerId?: string }) {
+  init(data: { runtime: Runtime; hud: HudApi; playerId?: string }) {
     this.runtime = data.runtime;
+    this.hud = data.hud;
     if (data.playerId) this.playerId = data.playerId;
   }
 
@@ -55,17 +70,40 @@ export class WorldScene extends Phaser.Scene {
     const cx = (COLS / 2) * TILE;
     const cy = (ROWS / 2) * TILE;
 
+    // Comercios: la Bolsa (acciones) y el Banco (bonos), flanqueando la plaza.
+    this.shops = [
+      { kind: "stock", name: "Bolsa", tex: "b_bolsa", x: cx - 3 * TILE, y: cy - TILE },
+      { kind: "bond", name: "Banco", tex: "b_banco", x: cx + 3 * TILE, y: cy - TILE },
+    ];
+
     // Fuente central del pueblo.
     this.add.image(cx, cy, "well").setDepth(cy);
 
     this.computePlots(cx, cy);
 
+    // Dibuja los comercios con su cartel flotante.
+    for (const shop of this.shops) {
+      this.add.image(shop.x, shop.y, shop.tex).setOrigin(0.5, 1).setDepth(shop.y);
+      const label = this.add
+        .text(shop.x, shop.y - 30, `${shop.kind === "stock" ? "📈" : "🏦"} ${shop.name}`, {
+          fontFamily: "system-ui",
+          fontSize: "20px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(9999)
+        .setResolution(3);
+      label.setScale(1 / this.cameras.main.zoom);
+    }
+
     // Heroe.
-    this.hero = this.add.image(cx, cy + 40, "hero_down").setDepth(cy + 40);
+    this.hero = this.add.image(cx, cy + 44, "hero_down").setDepth(cy + 44);
     this.cameras.main.startFollow(this.hero, true, 0.15, 0.15);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
     this.runtime.subscribe((s) => this.syncTown(s));
   }
@@ -129,6 +167,8 @@ export class WorldScene extends Phaser.Scene {
         if (y < TILE * 2 || y > WORLD_H - TILE * 2) continue;
         // Evita el centro (fuente) y el estanque.
         if (Math.hypot(x - cx, y - cy) < step) continue;
+        // Evita solaparse con los comercios.
+        if (this.shops.some((s) => Math.hypot(x - s.x, y - s.y) < 2 * TILE)) continue;
         ring.push({ x: Math.round(x), y: Math.round(y), r: radius });
       }
     }
@@ -195,6 +235,25 @@ export class WorldScene extends Phaser.Scene {
       this.hero.setFlipX(this.facing === "side" && this.flip);
       // Bamboleo al andar.
       this.hero.y += Math.sin(_t / 90) * 0.15;
+    }
+
+    // Comercio mas cercano dentro de rango.
+    let near: Shop | null = null;
+    let best = 34;
+    for (const s of this.shops) {
+      const d = Math.hypot(this.hero.x - s.x, this.hero.y - s.y + 8);
+      if (d < best) {
+        best = d;
+        near = s;
+      }
+    }
+    if (near !== this.nearShop) {
+      this.nearShop = near;
+      this.hud.setNearShop(near ? { kind: near.kind, name: near.name } : null);
+    }
+    // Entrar al comercio con E (o con el boton tactil, que llama a hud.openShop).
+    if (this.nearShop && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+      this.hud.openShop(this.nearShop.kind);
     }
   }
 }

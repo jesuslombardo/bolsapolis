@@ -2,9 +2,13 @@
 // Mantener este archivo libre de dependencias de Phaser: es codigo puro que
 // tambien correra en el servidor (Cloudflare Durable Object).
 
+// Tipo de activo: accion (volatil) o bono (estable, tipo renta fija).
+export type AssetKind = "stock" | "bond";
+
 export interface StockDef {
   id: string;
   name: string;
+  kind: AssetKind;
   /** Precio inicial en centimos para evitar errores de coma flotante. */
   startPriceCents: number;
   /** Deriva diaria (drift). Positiva = tiende a subir. */
@@ -16,6 +20,7 @@ export interface StockDef {
 export interface Stock {
   id: string;
   name: string;
+  kind: AssetKind;
   priceCents: number;
   /** Historial reciente de precios (centimos) para dibujar el sparkline. */
   history: number[];
