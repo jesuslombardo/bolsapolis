@@ -10,6 +10,7 @@ const PREFIX = "bolsapolis.save.";
 export interface SaveData {
   state: GameState;
   hero: { x: number; y: number } | null;
+  mapId?: string;
   ts: number;
 }
 
@@ -29,9 +30,14 @@ export function loadSave(email: string): SaveData | null {
   }
 }
 
-export function writeSave(email: string, state: GameState, hero: { x: number; y: number } | null) {
+export function writeSave(
+  email: string,
+  state: GameState,
+  hero: { x: number; y: number } | null,
+  mapId = "central",
+) {
   try {
-    lsSet(keyFor(email), JSON.stringify({ state, hero, ts: Date.now() }));
+    lsSet(keyFor(email), JSON.stringify({ state, hero, mapId, ts: Date.now() }));
   } catch {
     /* almacenamiento no disponible */
   }

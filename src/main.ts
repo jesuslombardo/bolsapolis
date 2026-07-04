@@ -61,6 +61,7 @@ function startGame(profile: Profile) {
     playerId: "p1",
     heroStart: saved?.hero ?? null,
     hairColor: profile.hairColor,
+    mapId: saved?.mapId ?? "central",
   });
   runtime.start();
 
@@ -69,7 +70,7 @@ function startGame(profile: Profile) {
   }
 
   // Autoguardado por cuenta: cada 4 s y al cerrar/ocultar la pestanya.
-  const save = () => writeSave(profile.email, runtime.getState(), worldScene.getHeroPos());
+  const save = () => writeSave(profile.email, runtime.getState(), worldScene.getHeroPos(), worldScene.getMapId());
   setInterval(save, 4000);
   window.addEventListener("beforeunload", save);
   document.addEventListener("visibilitychange", () => {

@@ -1,11 +1,13 @@
 import Phaser from "phaser";
 import type { AssetKind, GameState } from "../sim/types.ts";
 import { prosperityOf } from "../sim/city.ts";
+import { levelOf } from "../sim/progress.ts";
 import type { Runtime } from "./runtime.ts";
 import type { HudApi } from "../ui/hud.ts";
 import { buildTextures } from "./textures.ts";
 import { touchMove } from "./input.ts";
 import { sfx } from "./audio.ts";
+import { islandById, ISLANDS, OPP, type Dir, type IslandDef } from "./islands.ts";
 
 interface Shop {
   kind: AssetKind;
@@ -15,9 +17,17 @@ interface Shop {
   y: number;
 }
 
-// Mundo cenital estilo Argentum Online: caminas con un personaje por un mapa
-// de tiles y tu pueblo crece con tu patrimonio (de aldea a metropoli).
-// El render solo lee la simulacion; nada de logica de juego aqui.
+interface Exit {
+  dir: Dir;
+  target: string;
+  requiredLevel: number;
+  targetName: string;
+  x: number;
+  y: number;
+}
+
+// Mundo cenital estilo Argentum Online: caminas por un archipielago. La Isla
+// Central crece con tu patrimonio; las otras se desbloquean por nivel.
 
 const TILE = 16;
 const COLS = 72;
@@ -25,13 +35,20 @@ const ROWS = 52;
 const WORLD_W = COLS * TILE;
 const WORLD_H = ROWS * TILE;
 const SPEED = 95;
-const WALL_HALF = 9; // media anchura del pueblo amurallado, en tiles
+const WALL_HALF = 9;
+
+// Rectangulo de tierra (el resto es agua): deja un borde de mar.
+const LMINC = 5;
+const LMAXC = COLS - 6;
+const LMINR = 5;
+const LMAXR = ROWS - 6;
 
 const TIER_NAMES = ["Paraje", "Pueblo", "Villa", "Ciudad", "Metropoli", "Capital"];
 
 export class WorldScene extends Phaser.Scene {
   private runtime!: Runtime;
   private playerId = "p1";
+  private hairColor = 0x4a2f1c;
 
   private hero!: Phaser.GameObjects.Image;
   private buildings!: Phaser.GameObjects.Container;
@@ -49,9 +66,9 @@ export class WorldScene extends Phaser.Scene {
   private nearShop: Shop | null = null;
   private staticSolids: Array<{ x: number; y: number; r: number }> = [];
   private treeSolids: Array<{ x: number; y: number; r: number }> = [];
-  private waterSolids: Array<{ x: number; y: number; r: number }> = [];
   private wallSolids: Array<{ x: number; y: number; r: number }> = [];
   private solids: Array<{ x: number; y: number; r: number }> = [];
+  private land: boolean[][] = [];
   private lastTier = "";
   private stepTimer = 0;
   private heroStart: { x: number; y: number } | null = null;
@@ -61,11 +78,15 @@ export class WorldScene extends Phaser.Scene {
   private buildingLights!: Phaser.GameObjects.Container;
   private testHour: number | null = null;
 
+  private island!: IslandDef;
+  private entryDir: Dir | null = null;
+  private exits: Exit[] = [];
+  private traveling = false;
+  private lastGateToast = 0;
+
   constructor() {
     super("world");
   }
-
-  private hairColor = 0x4a2f1c;
 
   init(data: {
     runtime: Runtime;
@@ -73,17 +94,27 @@ export class WorldScene extends Phaser.Scene {
     playerId?: string;
     heroStart?: { x: number; y: number } | null;
     hairColor?: number;
+    mapId?: string;
+    entryDir?: Dir | null;
   }) {
     this.runtime = data.runtime;
     this.hud = data.hud;
     if (data.playerId) this.playerId = data.playerId;
     this.heroStart = data.heroStart ?? null;
     if (typeof data.hairColor === "number") this.hairColor = data.hairColor;
+    this.island = islandById(data.mapId ?? "central");
+    this.entryDir = data.entryDir ?? null;
+    // reset por-mapa
+    this.lastCount = -1;
+    this.lastTier = "";
+    this.traveling = false;
   }
 
-  /** Posicion actual del heroe (para guardar la partida). */
   getHeroPos() {
     return this.hero ? { x: Math.round(this.hero.x), y: Math.round(this.hero.y) } : null;
+  }
+  getMapId() {
+    return this.island?.id ?? "central";
   }
 
   create() {
@@ -96,30 +127,31 @@ export class WorldScene extends Phaser.Scene {
 
     const cx = (COLS / 2) * TILE;
     const cy = (ROWS / 2) * TILE;
+    const central = this.island.klass === "central";
 
-    this.paintGround();
+    this.paintIsland();
     this.paintRoads(cx, cy);
-    this.paintWalls(cx, cy);
+    if (central) this.paintWalls(cx, cy);
+    else this.wallSolids = [];
     this.scatterNature();
 
     this.buildings = this.add.container(0, 0);
     this.buildingLights = this.add.container(0, 0).setDepth(55000);
     this.townLights = this.add.container(0, 0).setDepth(55000);
 
-    // Comercios: Bolsa (acciones), Banco (bonos) y Almacen (materias primas).
+    // Comercios (en todas las islas, para poder operar donde estes).
     this.shops = [
       { kind: "stock", name: "Bolsa", tex: "b_bolsa", x: cx - 4 * TILE, y: cy - TILE },
       { kind: "bond", name: "Banco", tex: "b_banco", x: cx + 4 * TILE, y: cy - TILE },
       { kind: "commodity", name: "Almacen", tex: "b_almacen", x: cx, y: cy - 4 * TILE },
     ];
 
-    // Fuente central del pueblo.
     this.add.image(cx, cy, "well").setDepth(cy);
 
-    // Cartel del pueblo (con su nombre segun el nivel), a la entrada sur.
+    // Cartel del pueblo.
     this.add.image(cx - 8, cy + 5 * TILE, "sign").setOrigin(0.5, 1).setDepth(cy + 5 * TILE);
     this.townSignText = this.add
-      .text(cx, cy + 5 * TILE - 22, "Paraje", {
+      .text(cx, cy + 5 * TILE - 22, central ? "Paraje" : this.island.name, {
         fontFamily: "system-ui",
         fontSize: "16px",
         fontStyle: "bold",
@@ -130,9 +162,7 @@ export class WorldScene extends Phaser.Scene {
       .setResolution(3);
     this.townSignText.setScale(1 / this.cameras.main.zoom);
 
-    this.computePlots(cx, cy);
-
-    // Dibuja los comercios con su cartel flotante y su vendedor (NPC).
+    // Comercios: sprite + cartel + vendedor + farol.
     const shopIcon: Record<string, string> = { stock: "📈", bond: "🏦", commodity: "🏬" };
     const shopNpc: Record<string, string> = { stock: "npc_merchant", bond: "npc_banker", commodity: "npc_grocer" };
     for (const shop of this.shops) {
@@ -148,35 +178,45 @@ export class WorldScene extends Phaser.Scene {
         .setDepth(9999)
         .setResolution(3);
       label.setScale(1 / this.cameras.main.zoom);
-      // Vendedor parado frente al comercio.
       const npc = this.add.image(shop.x, shop.y + 8, shopNpc[shop.kind]).setOrigin(0.5, 1).setDepth(shop.y + 8);
       this.tweens.add({ targets: npc, y: npc.y - 1.5, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
-      // Farol del comercio (se prende de noche).
       this.addLight(this.townLights, shop.x, shop.y - 12, 1.6);
     }
 
-    // Luces fijas: la fuente y faroles en los cuatro portones de la muralla.
     this.addLight(this.townLights, cx, cy - 6, 1.4);
-    for (const [dc, dr] of [[0, -WALL_HALF], [0, WALL_HALF], [-WALL_HALF, 0], [WALL_HALF, 0]] as const) {
-      this.addLight(this.townLights, cx + dc * TILE, cy + dr * TILE, 1.3);
-    }
 
-    // Solidos fijos (colisiones): comercios, fuente, arboles, muralla y agua.
+    // Solidos fijos: comercios, fuente, arboles y (si hay) muralla.
     this.staticSolids = [
       ...this.shops.map((s) => ({ x: s.x, y: s.y - 8, r: 13 })),
       { x: cx, y: cy - 4, r: 8 },
       ...this.treeSolids,
       ...this.wallSolids,
-      ...this.waterSolids,
     ];
+    this.solids = [...this.staticSolids];
 
-    // Heroe (en la posicion guardada, o en la plaza).
-    const hx = this.heroStart?.x ?? cx;
-    const hy = this.heroStart?.y ?? cy + 44;
+    // Salidas (puentes con nivel requerido) + carteles.
+    this.buildExits();
+
+    // Contenido del pueblo.
+    if (central) {
+      this.computePlots(cx, cy);
+      this.runtime.subscribe((s) => this.syncTown(s));
+    } else {
+      this.placeFixedTown(cx, cy);
+    }
+
+    // Heroe: en la posicion guardada, en la entrada del puente, o en la plaza.
+    let hx = cx;
+    let hy = cy + 44;
+    if (this.entryDir) [hx, hy] = this.entryPos(this.entryDir);
+    else if (this.heroStart) {
+      hx = this.heroStart.x;
+      hy = this.heroStart.y;
+    }
     this.hero = this.add.image(hx, hy, "hero_down").setDepth(hy);
     this.cameras.main.startFollow(this.hero, true, 0.15, 0.15);
 
-    // Capa de dia/noche: rectangulo azul que se aclara/oscurece con el tiempo.
+    // Dia/noche.
     this.night = this.add
       .rectangle(0, 0, this.scale.width, this.scale.height, 0x0a1230)
       .setOrigin(0, 0)
@@ -189,40 +229,62 @@ export class WorldScene extends Phaser.Scene {
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
-    this.runtime.subscribe((s) => this.syncTown(s));
+    // Aviso de donde estas.
+    this.time.delayedCall(200, () => this.hud.toast(`📍 ${this.island.name}`, "info"));
   }
 
-  // Suelo: cesped en mosaico con variaciones y una plaza de tierra en el centro.
-  private paintGround() {
+  // --- Terreno: agua alrededor, tierra en el medio, puentes en las salidas ---
+  private paintIsland() {
+    // grilla de tierra
+    this.land = Array.from({ length: ROWS }, () => Array<boolean>(COLS).fill(false));
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const key = ["grass0", "grass1", "grass2"][(c * 7 + r * 13) % 3];
-        this.add.image(c * TILE, r * TILE, key).setOrigin(0, 0).setDepth(-1000);
+        const isLand = c >= LMINC && c <= LMAXC && r >= LMINR && r <= LMAXR;
+        if (isLand) this.land[r][c] = true;
+        const key = isLand ? ["grass0", "grass1", "grass2"][(c * 7 + r * 13) % 3] : "water";
+        const img = this.add.image(c * TILE, r * TILE, key).setOrigin(0, 0).setDepth(isLand ? -1000 : -998);
+        if (isLand && this.island.grassTint !== 0xffffff) img.setTint(this.island.grassTint);
       }
     }
-    // Plaza de tierra alrededor del centro.
-    const midC = Math.floor(COLS / 2);
-    const midR = Math.floor(ROWS / 2);
+    // Playa: arena en el borde de tierra que toca el agua.
+    for (let r = LMINR; r <= LMAXR; r++) {
+      for (let c = LMINC; c <= LMAXC; c++) {
+        if (c === LMINC || c === LMAXC || r === LMINR || r === LMAXR) {
+          this.add.image(c * TILE, r * TILE, "sand").setOrigin(0, 0).setDepth(-999.5);
+        }
+      }
+    }
+    // Puentes de tierra sobre el agua, en cada salida.
+    const midC = Math.round(COLS / 2);
+    const midR = Math.round(ROWS / 2);
+    for (const dir of Object.keys(this.island.exits) as Dir[]) {
+      if (dir === "w") for (let c = 0; c < LMINC; c++) this.bridgeCol(c, midR);
+      if (dir === "e") for (let c = LMAXC + 1; c < COLS; c++) this.bridgeCol(c, midR);
+      if (dir === "n") for (let r = 0; r < LMINR; r++) this.bridgeRow(midC, r);
+      if (dir === "s") for (let r = LMAXR + 1; r < ROWS; r++) this.bridgeRow(midC, r);
+    }
+    // Plaza de tierra en el centro.
     for (let r = midR - 5; r <= midR + 5; r++) {
       for (let c = midC - 6; c <= midC + 6; c++) {
         if (Math.hypot(c - midC, r - midR) < 6.5) {
-          this.add.image(c * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-999);
-        }
-      }
-    }
-    // Un estanque (agua) que no se puede atravesar.
-    this.waterSolids = [];
-    for (let r = 5; r < 12; r++) {
-      for (let c = 6; c < 14; c++) {
-        if (Math.hypot(c - 10, r - 8) < 4) {
-          this.add.image(c * TILE, r * TILE, "water").setOrigin(0, 0).setDepth(-998);
-          this.waterSolids.push({ x: c * TILE + TILE / 2, y: r * TILE + TILE / 2, r: 9 });
+          this.add.image(c * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-997);
         }
       }
     }
   }
+  private bridgeCol(c: number, midR: number) {
+    for (let d = -1; d <= 1; d++) {
+      this.add.image(c * TILE, (midR + d) * TILE, "path").setOrigin(0, 0).setDepth(-997);
+      this.land[midR + d][c] = true;
+    }
+  }
+  private bridgeRow(midC: number, r: number) {
+    for (let d = -1; d <= 1; d++) {
+      this.add.image((midC + d) * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-997);
+      this.land[r][midC + d] = true;
+    }
+  }
 
-  // Muralla de piedra alrededor del pueblo, con portones donde pasan los caminos.
   private paintWalls(cx: number, cy: number) {
     const midC = Math.round(cx / TILE);
     const midR = Math.round(cy / TILE);
@@ -234,69 +296,133 @@ export class WorldScene extends Phaser.Scene {
       this.wallSolids.push({ x, y, r: 8 });
     };
     for (let c = midC - WALL_HALF; c <= midC + WALL_HALF; c++) {
-      const gate = Math.abs(c - midC) <= 1; // porton norte/sur (por el camino)
-      if (!gate) {
+      if (Math.abs(c - midC) > 1) {
         place(c, midR - WALL_HALF);
         place(c, midR + WALL_HALF);
       }
     }
     for (let r = midR - WALL_HALF + 1; r <= midR + WALL_HALF - 1; r++) {
-      const gate = Math.abs(r - midR) <= 1; // porton este/oeste
-      if (!gate) {
+      if (Math.abs(r - midR) > 1) {
         place(midC - WALL_HALF, r);
         place(midC + WALL_HALF, r);
       }
     }
   }
 
-  // Caminos de tierra: una cruz que atraviesa el pueblo y sale al campo.
+  // Caminos desde el centro hacia cada salida (y hacia el sur para el cartel).
   private paintRoads(cx: number, cy: number) {
     const midC = Math.round(cx / TILE);
     const midR = Math.round(cy / TILE);
-    for (let c = 2; c < COLS - 2; c++) {
-      for (let d = -1; d <= 1; d++) {
-        this.add.image(c * TILE, (midR + d) * TILE, "path").setOrigin(0, 0).setDepth(-997);
-      }
-    }
-    for (let r = 2; r < ROWS - 2; r++) {
-      for (let d = -1; d <= 1; d++) {
-        this.add.image((midC + d) * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-997);
-      }
+    const dirs = new Set<Dir>([...(Object.keys(this.island.exits) as Dir[]), "s"]);
+    for (const dir of dirs) {
+      if (dir === "w") for (let c = LMINC; c <= midC; c++) this.roadCol(c, midR);
+      if (dir === "e") for (let c = midC; c <= LMAXC; c++) this.roadCol(c, midR);
+      if (dir === "n") for (let r = LMINR; r <= midR; r++) this.roadRow(midC, r);
+      if (dir === "s") for (let r = midR; r <= LMAXR; r++) this.roadRow(midC, r);
     }
   }
+  private roadCol(c: number, midR: number) {
+    for (let d = -1; d <= 1; d++) this.add.image(c * TILE, (midR + d) * TILE, "path").setOrigin(0, 0).setDepth(-996);
+  }
+  private roadRow(midC: number, r: number) {
+    for (let d = -1; d <= 1; d++) this.add.image((midC + d) * TILE, r * TILE, "path").setOrigin(0, 0).setDepth(-996);
+  }
 
-  // Arboles decorativos por los bordes y claros del mapa (patron determinista).
-  // Cada arbol es un solido: su tronco bloquea el paso.
   private scatterNature() {
-    let s = 12345;
+    let s = 12345 + this.island.id.length * 777;
     const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
     const midC = COLS / 2;
     const midR = ROWS / 2;
     this.treeSolids = [];
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < 120; i++) {
       const c = Math.floor(rnd() * COLS);
       const r = Math.floor(rnd() * ROWS);
+      if (!this.land[r]?.[c]) continue; // solo en tierra
       if (Math.hypot(c - midC, r - midR) < 12) continue; // deja libre el pueblo
-      if (c > 5 && c < 15 && r > 4 && r < 13) continue; // deja libre el estanque
-      if (Math.abs(c - midC) <= 1 || Math.abs(r - midR) <= 1) continue; // deja libres los caminos
+      if (Math.abs(c - midC) <= 1 || Math.abs(r - midR) <= 1) continue; // caminos
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE;
       this.add.image(x, y, "tree").setOrigin(0.5, 1).setDepth(y);
-      // Colision solo en el tronco (parte baja del arbol).
       this.treeSolids.push({ x, y: y - 4, r: 5 });
     }
   }
 
-  // Parcelas del pueblo: grilla DENTRO de la muralla, a los lados de los
-  // caminos. Se ordenan de adentro hacia afuera (el pueblo crece desde el centro).
+  // Salidas: al final de cada puente, con su nivel requerido y un cartel.
+  private buildExits() {
+    const midC = Math.round(COLS / 2);
+    const midR = Math.round(ROWS / 2);
+    this.exits = [];
+    for (const [dir, target] of Object.entries(this.island.exits) as [Dir, string][]) {
+      const def = ISLANDS[target];
+      let c = midC;
+      let r = midR;
+      if (dir === "w") c = 1;
+      if (dir === "e") c = COLS - 2;
+      if (dir === "n") r = 1;
+      if (dir === "s") r = ROWS - 2;
+      const x = c * TILE + TILE / 2;
+      const y = r * TILE + TILE / 2;
+      this.exits.push({ dir, target, requiredLevel: def.requiredLevel, targetName: def.name, x, y });
+      const lbl = this.add
+        .text(x, y - 16, `⛴️ ${def.name}\nNv ${def.requiredLevel}`, {
+          fontFamily: "system-ui",
+          fontSize: "13px",
+          fontStyle: "bold",
+          color: "#eaf6ff",
+          align: "center",
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(9999)
+        .setResolution(3);
+      lbl.setScale(1 / this.cameras.main.zoom);
+    }
+  }
+
+  private entryPos(dir: Dir): [number, number] {
+    const midC = Math.round(COLS / 2);
+    const midR = Math.round(ROWS / 2);
+    if (dir === "w") return [(LMINC + 1) * TILE, midR * TILE];
+    if (dir === "e") return [(LMAXC - 1) * TILE, midR * TILE];
+    if (dir === "n") return [midC * TILE, (LMINR + 1) * TILE];
+    return [midC * TILE, (LMAXR - 1) * TILE];
+  }
+
+  // Pueblo fijo de las islas satelite (no crece con el patrimonio).
+  private placeFixedTown(cx: number, cy: number) {
+    const set = this.island.buildings;
+    const plots: Array<{ x: number; y: number; r: number }> = [];
+    for (let dr = -8; dr <= 8; dr += 2) {
+      for (let dc = -8; dc <= 8; dc += 2) {
+        if (Math.abs(dc) <= 1 || Math.abs(dr) <= 1) continue;
+        const x = cx + dc * TILE;
+        const y = cy + dr * TILE;
+        const c = Math.round(x / TILE);
+        const r = Math.round(y / TILE);
+        if (!this.land[r]?.[c]) continue;
+        if (Math.hypot(x - cx, y - cy) < 2.5 * TILE) continue;
+        if (this.shops.some((sp) => Math.hypot(x - sp.x, y - sp.y) < 2 * TILE)) continue;
+        plots.push({ x, y, r: Math.max(Math.abs(dc), Math.abs(dr)) });
+      }
+    }
+    plots.sort((a, b) => a.r - b.r);
+    const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
+    plots.slice(0, this.island.fixed).forEach((plot, i) => {
+      const key = set[i % set.length];
+      this.add.image(plot.x, plot.y, key).setOrigin(0.5, 1).setDepth(plot.y);
+      buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
+      this.addLight(this.buildingLights, plot.x, plot.y - 10, 1);
+    });
+    this.solids = [...this.staticSolids, ...buildingSolids];
+  }
+
   private computePlots(cx: number, cy: number) {
     const plots: Array<{ x: number; y: number; r: number }> = [];
     for (let dr = -(WALL_HALF - 2); dr <= WALL_HALF - 2; dr += 2) {
       for (let dc = -(WALL_HALF - 2); dc <= WALL_HALF - 2; dc += 2) {
-        if (Math.abs(dc) <= 1 || Math.abs(dr) <= 1) continue; // deja libres los caminos
+        if (Math.abs(dc) <= 1 || Math.abs(dr) <= 1) continue;
         const x = cx + dc * TILE;
         const y = cy + dr * TILE;
-        if (Math.hypot(x - cx, y - cy) < 2.5 * TILE) continue; // fuente/plaza
+        if (Math.hypot(x - cx, y - cy) < 2.5 * TILE) continue;
         if (this.shops.some((s) => Math.hypot(x - s.x, y - s.y) < 2 * TILE)) continue;
         plots.push({ x, y, r: Math.max(Math.abs(dc), Math.abs(dr)) });
       }
@@ -305,27 +431,21 @@ export class WorldScene extends Phaser.Scene {
     this.plots = plots;
   }
 
-  // Reconstruye el pueblo cuando cambia el numero de edificios (patrimonio).
   private syncTown(state: GameState) {
     const p = prosperityOf(state, this.playerId);
     const count = Math.min(this.plots.length, Math.round(3 + p * 30));
     if (count === this.lastCount) return;
-
     const grew = count > this.lastCount && this.lastCount >= 0;
     const from = Math.max(0, this.lastCount);
     this.buildings.removeAll(true);
-
     const buildingSolids: Array<{ x: number; y: number; r: number }> = [];
     this.buildingLights.removeAll(true);
     for (let i = 0; i < count; i++) {
       const plot = this.plots[i];
-      const key = buildingKey(p, i);
-      const img = this.add.image(plot.x, plot.y, key).setOrigin(0.5, 1).setDepth(plot.y);
+      const img = this.add.image(plot.x, plot.y, buildingKey(p, i)).setOrigin(0.5, 1).setDepth(plot.y);
       this.buildings.add(img);
       buildingSolids.push({ x: plot.x, y: plot.y - 6, r: 9 });
-      // Ventana iluminada de cada casa (se prende de noche).
       this.addLight(this.buildingLights, plot.x, plot.y - 10, 1);
-      // Animacion de "construccion" para los que aparecen nuevos.
       if (grew && i >= from) {
         img.setScale(0.2).setAlpha(0.4);
         this.tweens.add({ targets: img, scale: 1, alpha: 1, duration: 260, ease: "Back.easeOut" });
@@ -333,29 +453,17 @@ export class WorldScene extends Phaser.Scene {
     }
     this.solids = [...this.staticSolids, ...buildingSolids];
     this.lastCount = count;
-
-    // Subida de nivel de la ciudad: destello de camara (el aviso + sonido los
-    // maneja el HUD, que ve cada cambio de estado).
     const tier = tierName(p);
     if (this.townSignText) this.townSignText.setText(tier);
-    if (this.lastTier && tier !== this.lastTier) {
-      this.cameras.main.flash(350, 120, 170, 255);
-    }
+    if (this.lastTier && tier !== this.lastTier) this.cameras.main.flash(350, 120, 170, 255);
     this.lastTier = tier;
   }
 
-  // Agrega una lucecita (brillo aditivo calido) a un contenedor de luces.
   private addLight(container: Phaser.GameObjects.Container, x: number, y: number, scale = 1.5) {
-    const img = this.add
-      .image(x, y, "glow")
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setTint(0xffd98a)
-      .setScale(scale);
+    const img = this.add.image(x, y, "glow").setBlendMode(Phaser.BlendModes.ADD).setTint(0xffd98a).setScale(scale);
     container.add(img);
   }
 
-  // Cuanto solapa la posicion (x,y) con los edificios/comercios (0 = libre).
-  // El radio del heroe es ~4.
   private penetration(x: number, y: number): number {
     let total = 0;
     for (const s of this.solids) {
@@ -365,21 +473,22 @@ export class WorldScene extends Phaser.Scene {
     return total;
   }
 
+  // ¿(x,y) cae en agua? (para que no se pueda caminar sobre el mar)
+  private isWater(x: number, y: number): boolean {
+    const c = Math.floor(x / TILE);
+    const r = Math.floor(y / TILE);
+    return !this.land[r]?.[c];
+  }
+
   update(_t: number, delta: number) {
     if (!this.hero) return;
     const dt = delta / 1000;
     let vx = 0;
     let vy = 0;
-    const left = this.cursors.left.isDown || this.wasd.A.isDown;
-    const right = this.cursors.right.isDown || this.wasd.D.isDown;
-    const up = this.cursors.up.isDown || this.wasd.W.isDown;
-    const down = this.cursors.down.isDown || this.wasd.S.isDown;
-    if (left) vx -= 1;
-    if (right) vx += 1;
-    if (up) vy -= 1;
-    if (down) vy += 1;
-
-    // Suma el joystick tactil (movil).
+    if (this.cursors.left.isDown || this.wasd.A.isDown) vx -= 1;
+    if (this.cursors.right.isDown || this.wasd.D.isDown) vx += 1;
+    if (this.cursors.up.isDown || this.wasd.W.isDown) vy -= 1;
+    if (this.cursors.down.isDown || this.wasd.S.isDown) vy += 1;
     vx += touchMove.x;
     vy += touchMove.y;
 
@@ -389,16 +498,13 @@ export class WorldScene extends Phaser.Scene {
       const stepY = (vy / len) * SPEED * dt;
       const fromX = this.hero.x;
       const fromY = this.hero.y;
-      // Colision por eje basada en penetracion: se permite el movimiento
-      // mientras no aumente el solape con los edificios (asi bloquea la entrada
-      // pero siempre deja salir si un edificio apareciera encima).
+      const basePen = this.penetration(this.hero.x, this.hero.y);
       const tryX = Phaser.Math.Clamp(this.hero.x + stepX, TILE, WORLD_W - TILE);
-      if (this.penetration(tryX, this.hero.y) <= this.penetration(this.hero.x, this.hero.y)) this.hero.x = tryX;
+      if (!this.isWater(tryX, this.hero.y) && this.penetration(tryX, this.hero.y) <= basePen) this.hero.x = tryX;
       const tryY = Phaser.Math.Clamp(this.hero.y + stepY, TILE, WORLD_H - TILE);
-      if (this.penetration(this.hero.x, tryY) <= this.penetration(this.hero.x, this.hero.y)) this.hero.y = tryY;
+      if (!this.isWater(this.hero.x, tryY) && this.penetration(this.hero.x, tryY) <= basePen) this.hero.y = tryY;
       this.hero.setDepth(this.hero.y);
 
-      // Orientacion: el eje dominante manda.
       if (Math.abs(vx) > Math.abs(vy)) {
         this.facing = "side";
         this.flip = vx < 0;
@@ -408,10 +514,8 @@ export class WorldScene extends Phaser.Scene {
       const key = this.facing === "side" ? "hero_side" : this.facing === "up" ? "hero_up" : "hero_down";
       this.hero.setTexture(key);
       this.hero.setFlipX(this.facing === "side" && this.flip);
-      // Bamboleo al andar.
       this.hero.y += Math.sin(_t / 90) * 0.15;
 
-      // Pasitos (tiki-tiki): solo si de verdad se desplazo (no contra una pared).
       const moved = Math.hypot(this.hero.x - fromX, this.hero.y - fromY);
       if (moved > 0.2) {
         this.stepTimer += delta;
@@ -420,13 +524,13 @@ export class WorldScene extends Phaser.Scene {
           sfx.step();
         }
       } else {
-        this.stepTimer = 260; // proximo movimiento suena enseguida
+        this.stepTimer = 260;
       }
     } else {
       this.stepTimer = 260;
     }
 
-    // Comercio mas cercano dentro de rango.
+    // Comercio cercano.
     let near: Shop | null = null;
     let best = 34;
     for (const s of this.shops) {
@@ -440,22 +544,50 @@ export class WorldScene extends Phaser.Scene {
       this.nearShop = near;
       this.hud.setNearShop(near ? { kind: near.kind, name: near.name } : null);
     }
-    // Entrar al comercio con E (o con el boton tactil, que llama a hud.openShop).
-    if (this.nearShop && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
-      this.hud.openShop(this.nearShop.kind);
+    if (this.nearShop && Phaser.Input.Keyboard.JustDown(this.interactKey)) this.hud.openShop(this.nearShop.kind);
+
+    // Salidas: viajar a otra isla si el nivel alcanza.
+    if (!this.traveling) {
+      for (const ex of this.exits) {
+        if (Math.hypot(this.hero.x - ex.x, this.hero.y - ex.y) < 16) {
+          this.tryTravel(ex);
+          break;
+        }
+      }
     }
 
-    // Dia/noche segun la hora REAL de Argentina (ciclo de 24 h).
+    // Dia/noche.
     const nightness = this.nightnessNow();
     this.night.setAlpha(nightness * 0.55);
-    // Las lucecitas se prenden a medida que baja la luz.
     const lightOn = Math.max(0, (nightness - 0.2) / 0.8);
     this.townLights.setAlpha(lightOn);
     this.buildingLights.setAlpha(lightOn);
   }
 
-  // Oscuridad [0..1] segun la hora de Argentina (UTC-3): 0 = mediodia,
-  // 1 = madrugada. Se puede forzar con ?hour=NN para pruebas.
+  private tryTravel(ex: Exit) {
+    const lvl = levelOf(this.runtime.getState(), this.playerId);
+    if (lvl < ex.requiredLevel) {
+      if (_now() - this.lastGateToast > 1500) {
+        this.lastGateToast = _now();
+        this.hud.toast(`🔒 Necesitás Nivel ${ex.requiredLevel} para entrar a ${ex.targetName}`, "bad");
+        sfx.deny();
+      }
+      return;
+    }
+    this.traveling = true;
+    this.cameras.main.fadeOut(220, 6, 12, 20);
+    this.cameras.main.once("camerafadeoutcomplete", () => {
+      this.scene.restart({
+        runtime: this.runtime,
+        hud: this.hud,
+        playerId: this.playerId,
+        hairColor: this.hairColor,
+        mapId: ex.target,
+        entryDir: OPP[ex.dir],
+      });
+    });
+  }
+
   private nightnessNow(): number {
     let h: number;
     if (this.testHour != null) {
@@ -464,16 +596,19 @@ export class WorldScene extends Phaser.Scene {
       const now = new Date();
       h = ((now.getUTCHours() + now.getUTCMinutes() / 60 - 3) % 24 + 24) % 24;
     }
-    // Mas claro al mediodia (~14 h), mas oscuro de madrugada (~2 h).
     return (1 - Math.cos(((h - 14) / 24) * Math.PI * 2)) / 2;
   }
 }
 
+// Reloj (envuelto para que sea facil de mockear en pruebas).
+function _now(): number {
+  return new Date().getTime();
+}
+
 function buildingKey(prosperity: number, i: number): string {
-  // Variedad determinista + mejora de tier con la prosperidad.
   const v = frac(Math.sin((i + 1) * 45.23) * 1000);
   const v2 = frac(Math.sin((i + 1) * 91.7) * 1000);
-  const level = prosperity * 3 + v; // 0..~4
+  const level = prosperity * 3 + v;
   if (i === 0 && prosperity > 0.7) return "b_castle";
   if (level > 2.6) return "b_tower";
   if (level > 1.3) return v2 < 0.4 ? "b_house" : "b_rancho";
