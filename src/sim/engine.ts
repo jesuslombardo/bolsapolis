@@ -1,4 +1,4 @@
-import type { Command, GameState, PlayerState, Stock } from "./types.ts";
+import type { Command, GameState, Holding, PlayerState, Stock } from "./types.ts";
 import { HISTORY_LEN } from "./types.ts";
 import { STOCK_DEFS } from "./market.ts";
 import { makeRng, gaussian } from "./rng.ts";
@@ -23,11 +23,26 @@ export function createInitialState(seed: number, playerId = "p1", playerName = "
       history: [def.startPriceCents],
     };
   }
+  // Cartera inicial diversificada: parte del capital ya viene invertido para
+  // que la ciudad reaccione al mercado desde el primer segundo (si esperas sin
+  // hacer nada, igual la ves subir y bajar). El resto queda en efectivo.
+  const seededHoldings: Array<[string, number]> = [
+    ["GRANO", 40],
+    ["LADRI", 20],
+    ["VOLT", 10],
+  ];
+  const holdings: Record<string, Holding> = {};
+  let spent = 0;
+  for (const [id, shares] of seededHoldings) {
+    const price = stocks[id].priceCents;
+    holdings[id] = { shares, avgCostCents: price };
+    spent += shares * price;
+  }
   const player: PlayerState = {
     id: playerId,
     name: playerName,
-    cashCents: STARTING_CASH_CENTS,
-    holdings: {},
+    cashCents: STARTING_CASH_CENTS - spent,
+    holdings,
   };
   return { tick: 0, seed, stocks, players: { [playerId]: player } };
 }

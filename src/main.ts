@@ -7,7 +7,7 @@ import { mountHud } from "./ui/hud.ts";
 // En multiplayer la asignara el servidor al crear la sala.
 const SEED = 20260703;
 
-const runtime = createLocalRuntime({ seed: SEED, tickMs: 1000 });
+const runtime = createLocalRuntime({ seed: SEED, tickMs: 700 });
 
 const gameEl = document.getElementById("game")!;
 const appEl = document.getElementById("app")!;

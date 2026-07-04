@@ -2,66 +2,81 @@ import type { GameState } from "./types.ts";
 import { netWorthCents } from "./engine.ts";
 
 // El corazon de Bolsapolis: tu patrimonio SE CONVIERTE en tu ciudad.
-// Esta es una funcion derivada pura -> el mismo patrimonio siempre produce
-// la misma ciudad, asi que el render no necesita guardar estado propio.
+// Funcion derivada pura -> el mismo patrimonio siempre produce la misma
+// ciudad, asi que el render no guarda estado propio.
+//
+// A diferencia de la version por escalones, aqui el crecimiento es CONTINUO:
+// cualquier variacion de patrimonio mueve el skyline, para que se note al
+// instante cuando el mercado sube o baja.
 
-export interface CityTier {
-  level: number;
-  name: string;
-  /** Patrimonio (en unidades enteras de moneda) necesario para alcanzarlo. */
-  netWorthThreshold: number;
-  /** Numero de edificios visibles en este nivel. */
-  buildings: number;
-  /** Altura maxima (en pisos) que pueden alcanzar los edificios. */
-  maxFloors: number;
-}
+// Rango de patrimonio (en unidades de moneda) mapeado a la ciudad.
+// Empiezas con 10.000 -> ya se ve un pueblo, no un descampado.
+const WEALTH_MIN = 6_000;
+const WEALTH_MAX = 90_000;
 
-export const CITY_TIERS: CityTier[] = [
-  { level: 0, name: "Descampado", netWorthThreshold: 0, buildings: 3, maxFloors: 1 },
-  { level: 1, name: "Aldea", netWorthThreshold: 11_000, buildings: 5, maxFloors: 2 },
-  { level: 2, name: "Pueblo", netWorthThreshold: 13_000, buildings: 7, maxFloors: 3 },
-  { level: 3, name: "Villa", netWorthThreshold: 16_000, buildings: 9, maxFloors: 5 },
-  { level: 4, name: "Ciudad", netWorthThreshold: 20_000, buildings: 11, maxFloors: 8 },
-  { level: 5, name: "Metropoli", netWorthThreshold: 28_000, buildings: 13, maxFloors: 12 },
-  { level: 6, name: "Megalopolis", netWorthThreshold: 45_000, buildings: 15, maxFloors: 18 },
+const TIER_NAMES = [
+  "Aldea",
+  "Pueblo",
+  "Villa",
+  "Ciudad",
+  "Metropoli",
+  "Megalopolis",
 ];
 
-export interface CityView {
-  tier: CityTier;
-  /** Progreso [0..1] hacia el siguiente tier. */
-  progress: number;
-  /** Altura (en pisos) de cada edificio; su longitud es tier.buildings. */
-  floors: number[];
+export interface Building {
+  /** Altura en pisos. */
+  floors: number;
+  /** Ancho relativo [0.7..1.1] para variar el skyline. */
+  width: number;
+  /** Tono [0..1] para dar variedad de color. */
+  hue: number;
 }
 
-export function tierForNetWorth(netWorthUnits: number): CityTier {
-  let current = CITY_TIERS[0];
-  for (const t of CITY_TIERS) {
-    if (netWorthUnits >= t.netWorthThreshold) current = t;
-    else break;
-  }
-  return current;
+export interface CityView {
+  /** Nombre del nivel actual (Aldea, Pueblo, ...). */
+  tierName: string;
+  /** Progreso global [0..1] de pobreza a megalopolis. */
+  prosperity: number;
+  /** Edificios a dibujar, de izquierda a derecha. */
+  buildings: Building[];
+  /** Numero de arboles/parques (decrecen al urbanizarse). */
+  trees: number;
+}
+
+export function prosperityOf(state: GameState, playerId: string): number {
+  const units = netWorthCents(state, playerId) / 100;
+  return clamp01((units - WEALTH_MIN) / (WEALTH_MAX - WEALTH_MIN));
 }
 
 export function cityView(state: GameState, playerId: string): CityView {
-  const netWorthUnits = netWorthCents(state, playerId) / 100;
-  const tier = tierForNetWorth(netWorthUnits);
-  const next = CITY_TIERS[tier.level + 1];
+  const p = prosperityOf(state, playerId);
 
-  const progress = next
-    ? clamp01((netWorthUnits - tier.netWorthThreshold) / (next.netWorthThreshold - tier.netWorthThreshold))
-    : 1;
+  // Nombre del nivel segun el tramo de prosperidad.
+  const tierIdx = Math.min(TIER_NAMES.length - 1, Math.floor(p * TIER_NAMES.length));
+  const tierName = TIER_NAMES[tierIdx];
 
-  // Los edificios crecen dentro del tier segun el progreso: al principio del
-  // tier son bajos y se van elevando hacia maxFloors conforme sube el patrimonio.
-  const floors: number[] = [];
-  for (let i = 0; i < tier.buildings; i++) {
-    // Variacion determinista por edificio para que el skyline no sea plano.
-    const variation = 0.55 + 0.45 * pseudo(i, tier.level);
-    const height = 1 + Math.round((tier.maxFloors - 1) * progress * variation);
-    floors.push(Math.max(1, Math.min(tier.maxFloors, height)));
+  // Numero de edificios: de 5 (aldea) a 18 (megalopolis).
+  const count = Math.round(5 + p * 13);
+
+  const buildings: Building[] = [];
+  for (let i = 0; i < count; i++) {
+    // Variacion determinista y estable por posicion.
+    const v = pseudo(i, 7);
+    const v2 = pseudo(i, 31);
+    // Altura base crece con la prosperidad; cada edificio varia alrededor.
+    const maxFloors = 1 + p * 22; // hasta ~23 pisos en megalopolis
+    const floors = Math.max(1, Math.round(maxFloors * (0.45 + 0.55 * v)));
+    buildings.push({
+      floors,
+      width: 0.7 + 0.4 * v2,
+      hue: 0.55 + 0.12 * v, // azules/verdes frios
+    });
   }
-  return { tier, progress, floors };
+
+  // Los arboles abundan en la aldea y desaparecen al urbanizarse.
+  const trees = Math.round((1 - p) * 6);
+
+  return { tierName, prosperity: p, buildings, trees };
 }
 
 function clamp01(x: number): number {

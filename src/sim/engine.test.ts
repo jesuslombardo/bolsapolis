@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createInitialState, tick, applyCommand, netWorthCents } from "./engine.ts";
-import { tierForNetWorth } from "./city.ts";
+import { prosperityOf, cityView } from "./city.ts";
 
 describe("motor de simulacion", () => {
   it("es determinista: misma seed -> mismos precios", () => {
@@ -57,9 +57,30 @@ describe("motor de simulacion", () => {
 });
 
 describe("ciudad", () => {
-  it("mapea patrimonio a tiers crecientes", () => {
-    expect(tierForNetWorth(0).level).toBe(0);
-    expect(tierForNetWorth(12_000).level).toBe(1);
-    expect(tierForNetWorth(50_000).level).toBe(6);
+  it("la prosperidad crece con el patrimonio", () => {
+    const s0 = createInitialState(7);
+    const base = prosperityOf(s0, "p1");
+    // Inyectamos efectivo comprando nada: subimos patrimonio via un estado ficticio.
+    const rich = {
+      ...s0,
+      players: { p1: { ...s0.players.p1, cashCents: 9_000_000 } },
+    };
+    expect(prosperityOf(rich, "p1")).toBeGreaterThan(base);
+  });
+
+  it("mas patrimonio produce mas edificios", () => {
+    const poor = createInitialState(7);
+    const rich = { ...poor, players: { p1: { ...poor.players.p1, cashCents: 9_000_000 } } };
+    expect(cityView(rich, "p1").buildings.length).toBeGreaterThan(
+      cityView(poor, "p1").buildings.length,
+    );
+  });
+
+  it("la prosperidad queda acotada en [0,1]", () => {
+    const broke = createInitialState(7);
+    const zero = { ...broke, players: { p1: { ...broke.players.p1, cashCents: 0, holdings: {} } } };
+    expect(prosperityOf(zero, "p1")).toBeGreaterThanOrEqual(0);
+    const loaded = { ...broke, players: { p1: { ...broke.players.p1, cashCents: 99_000_000 } } };
+    expect(prosperityOf(loaded, "p1")).toBeLessThanOrEqual(1);
   });
 });
