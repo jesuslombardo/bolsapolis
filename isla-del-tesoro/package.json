@@ -1,0 +1,15 @@
+{
+  "name": "isla-del-tesoro",
+  "version": "0.1.0",
+  "description": "La Isla del Tesoro - juego 3D de escape/tesoro (Three.js)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8099"
+  },
+  "keywords": ["game", "threejs", "webgl", "escape-room"],
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}

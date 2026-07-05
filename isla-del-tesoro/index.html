@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>La Isla del Tesoro 🏴‍☠️</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%97%BA%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="lives" aria-label="vidas"></div>
+    <div id="objective"><span class="tag">Objetivo</span><span id="objective-text"></span></div>
+    <div id="crosshair">+</div>
+    <div id="prompt" class="hidden"></div>
+    <button id="hint-btn" title="Pedir una pista">💡 Pista</button>
+  </div>
+
+  <!-- Intro / story overlay -->
+  <div id="intro" class="overlay">
+    <div class="card">
+      <h1>La Isla del Tesoro</h1>
+      <p class="subtitle">🏴‍☠️ Una aventura de naufragio y tesoros</p>
+      <p>
+        Tu barco naufragó y encallaste en una isla desconocida... la
+        <strong>Isla del Tesoro</strong>. Entre los restos del naufragio
+        encontraste un viejo <strong>mapa</strong>. La primera marca apunta a una
+        <strong>cueva</strong> escondida en la isla.
+      </p>
+      <p class="hint-line">Explorá la isla, metete en la cueva y descubrí la primera pista para seguir el rastro del tesoro.</p>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> moverte</div>
+        <div><kbd>Mouse</kbd> mirar</div>
+        <div><kbd>Shift</kbd> correr</div>
+        <div><kbd>E</kbd> interactuar</div>
+        <div><kbd>Esc</kbd> liberar mouse</div>
+      </div>
+      <p class="warn">⚠️ Tenés <strong>3 vidas</strong>. Cuidado con el mar profundo y las trampas de la isla.</p>
+      <button id="start-btn" class="big-btn">Explorar la isla ⛵</button>
+    </div>
+  </div>
+
+  <!-- Click-to-resume overlay -->
+  <div id="resume" class="overlay hidden">
+    <div class="card small">
+      <p>Juego en pausa</p>
+      <button id="resume-btn" class="big-btn">Volver al juego</button>
+    </div>
+  </div>
+
+  <!-- Clue panel -->
+  <div id="clue" class="overlay hidden">
+    <div class="card scroll">
+      <h2>📜 Inscripción</h2>
+      <pre id="clue-text"></pre>
+      <button id="clue-close" class="big-btn">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- Riddle modal -->
+  <div id="riddle" class="overlay hidden">
+    <div class="card">
+      <h2>🔒 El cofre está cerrado</h2>
+      <p id="riddle-question"></p>
+      <input id="riddle-input" type="text" autocomplete="off" placeholder="Escribí tu respuesta..." />
+      <div id="riddle-msg"></div>
+      <div class="row">
+        <button id="riddle-submit" class="big-btn">Responder</button>
+        <button id="riddle-hint" class="ghost-btn">💡 Pista</button>
+        <button id="riddle-close" class="ghost-btn">Salir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Win overlay -->
+  <div id="win" class="overlay hidden">
+    <div class="card">
+      <h1>🎉 ¡Pista 1 resuelta!</h1>
+      <p id="win-text"></p>
+      <p class="subtitle">Fin del MVP · La aventura continúa hacia el volcán 🌋</p>
+      <button id="win-restart" class="big-btn">Jugar de nuevo</button>
+    </div>
+  </div>
+
+  <!-- Game over overlay -->
+  <div id="gameover" class="overlay hidden">
+    <div class="card">
+      <h1>☠️ Naufragaste para siempre</h1>
+      <p>Te quedaste sin vidas. El mar reclamó al pirata.</p>
+      <button id="gameover-restart" class="big-btn">Intentar de nuevo</button>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+  <div id="damage-flash"></div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
